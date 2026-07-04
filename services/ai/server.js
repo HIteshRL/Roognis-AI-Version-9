@@ -1,29 +1,46 @@
-// ─────────────────────────────────────────────────────────────────────────────
-// Roognis AI — AI Service stub
-// Replace this file with the full implementation.
-// See: roognis-ai-design-complete.pdf → LLD v3 → AI Service :3002
-//
-// Responsibilities:
-//   - POST /api/ai/chat/session  → create chat session
-//   - POST /api/ai/chat          → SSE streaming chat (RAG + Ollama)
-//   - GET  /api/ai/chat/:id/history
-//   - POST /api/ai/image         → async image generation (ComfyUI)
-//   - GET  /api/ai/image/:id/status
-//   - GET  /api/ai/video/topics
-//   - GET  /api/ai/video/:topic
-//   - POST /api/ai/feedback
-//
-// JWT middleware: copy services/auth/middleware/auth.js into middleware/auth.js
-// ─────────────────────────────────────────────────────────────────────────────
-
 const express = require('express');
-const app     = express();
-const PORT    = process.env.PORT || 3002;
+const cookieParser = require('cookie-parser');
+const { PrismaClient } = require('@prisma/client');
 
-app.use(express.json());
+const app = express();
+const prisma = new PrismaClient();
+const PORT = process.env.PORT || 3002;
 
-app.get('/health', (_req, res) => res.status(200).json({ status: 'stub', service: 'ai' }));
+app.disable('x-powered-by');
+app.use(express.json({ limit: '1mb' }));
+app.use(cookieParser());
 
-app.use((_req, res) => res.status(503).json({ error: 'AI service not yet implemented.' }));
+app.locals.prisma = prisma;
 
-app.listen(PORT, () => console.log(`[ai] Stub running on :${PORT}`));
+app.get('/health', (_req, res) => {
+  res.status(200).json({ status: 'ok', service: 'ai' });
+});
+
+// Feature routes are intentionally added in later MVP parts.
+app.use('/api/ai', (_req, res) => {
+  res.status(404).json({ error: 'AI endpoint not implemented yet.' });
+});
+
+app.use((_req, res) => {
+  res.status(404).json({ error: 'Not found' });
+});
+
+app.use((err, _req, res, _next) => {
+  console.error('[ai] unhandled error:', err);
+  res.status(500).json({ error: 'Internal server error' });
+});
+
+const server = app.listen(PORT, () => {
+  console.log(`[ai] Service running on :${PORT}`);
+});
+
+async function shutdown(signal) {
+  console.log(`[ai] ${signal} received. Shutting down...`);
+  server.close(async () => {
+    await prisma.$disconnect();
+    process.exit(0);
+  });
+}
+
+process.on('SIGINT', () => shutdown('SIGINT'));
+process.on('SIGTERM', () => shutdown('SIGTERM'));
