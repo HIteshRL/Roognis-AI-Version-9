@@ -31,10 +31,22 @@ Completed:
   - Replaced AI stub server with a real Express foundation.
   - Aligned AI Dockerfile with the Auth service install/generate pattern.
   - Verified Prisma generation, Prisma schema validation, and `/health`.
+- Part 2 implementation: Chat session, chat history, and SSE chat MVP.
+  - Added `POST /api/ai/chat/session`.
+  - Added `GET /api/ai/chat/:sessionId/history`.
+  - Added `POST /api/ai/chat` with SSE streaming.
+  - Added student-only auth checks.
+  - Added session ownership checks.
+  - Added RAG retrieval with timeout and empty-result fallback.
+  - Added Roognis tutor prompt construction.
+  - Added Ollama streaming parser.
+  - Added user/assistant message persistence.
+  - Added fire-and-forget analytics event call.
 
 Next:
 
-- Part 2: Chat session, chat history, and SSE chat MVP.
+- Part 2 full integration verification with Postgres, Auth cookie, RAG stub, Analytics stub, and Ollama.
+- Then Part 3: Video and feedback.
 
 ## Source Of Truth
 
@@ -416,15 +428,16 @@ Failure to send analytics must never fail the user request.
 
 ## Next Coding Step
 
-Start with Part 2 only.
+Finish Part 2 verification before starting Part 3.
 
 Do not implement image, feedback, video, and quiz at the same time as chat.
 
 Next coding checkpoint:
 
-1. Implement `POST /api/ai/chat/session`.
-2. Implement `GET /api/ai/chat/:sessionId/history`.
-3. Implement `POST /api/ai/chat` with SSE.
-4. Call RAG with timeout and safe fallback.
-5. Stream Ollama response and save both messages.
-6. Fire analytics event without blocking the chat response.
+1. Run AI DB push against local Postgres.
+2. Start Auth, RAG, Analytics, Ollama, and AI together.
+3. Login as `arjun@demo.com`.
+4. Create a chat session with the login cookie.
+5. Send an SSE chat message.
+6. Verify history returns saved user and assistant messages.
+7. Confirm Analytics failure or stub behavior does not break chat.
