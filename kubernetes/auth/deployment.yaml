@@ -1,0 +1,64 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: auth
+  namespace: roognis
+  labels:
+    app: auth
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: auth
+  template:
+    metadata:
+      labels:
+        app: auth
+    spec:
+      initContainers:
+        # Runs schema migration before the app starts.
+        # initContainer ensures only one pod runs migrations even with replicas > 1.
+        - name: db-migrate
+          image: roognis/auth:latest
+          command: ["npx", "prisma", "db", "push", "--schema=prisma/schema.prisma", "--accept-data-loss"]
+          envFrom:
+            - secretRef:
+                name: auth-secrets
+      containers:
+        - name: auth
+          image: roognis/auth:latest
+          command: ["node", "scripts/seed.js"]
+          # Seed runs once on first deploy, then the app starts
+          lifecycle:
+            postStart:
+              exec:
+                command: ["node", "server.js"]
+          ports:
+            - containerPort: 3001
+          envFrom:
+            - secretRef:
+                name: auth-secrets
+          env:
+            - name: PORT
+              value: "3001"
+            - name: NODE_ENV
+              value: production
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 3001
+            initialDelaySeconds: 15
+            periodSeconds: 20
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 3001
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          resources:
+            requests:
+              cpu: "100m"
+              memory: "128Mi"
+            limits:
+              cpu: "500m"
+              memory: "256Mi"
