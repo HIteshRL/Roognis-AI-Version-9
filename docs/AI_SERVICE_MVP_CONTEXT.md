@@ -1,6 +1,6 @@
 # Roognis AI Service MVP Context
 
-Last updated: 2026-07-04
+Last updated: 2026-07-05
 
 This file is the working context for building the Roognis AI Service in small, safe parts. Use it before coding so we do not forget the current scope, accidentally overbuild production features, or mix old design documents with the latest MVP plan.
 
@@ -42,11 +42,20 @@ Completed:
   - Added Ollama streaming parser.
   - Added user/assistant message persistence.
   - Added fire-and-forget analytics event call.
+- Part 3 implementation: Video recommendations and feedback.
+  - Added curated trusted-source video library metadata.
+  - Added `GET /api/ai/video/topics`.
+  - Added `GET /api/ai/video/:topic`.
+  - Added `POST /api/ai/feedback`.
+  - Feedback stores rating/comment against assistant messages.
+  - Feedback fires analytics events without blocking the response.
+  - Video view/like metrics are placeholders until YouTube/DIKSHA/provider API refresh is added.
 
 Next:
 
 - Part 2 full integration verification with Postgres, Auth cookie, RAG stub, Analytics stub, and Ollama.
-- Then Part 3: Video and feedback.
+- Part 3 Docker verification with Auth cookie and AI DB.
+- Then Part 4: Image MVP.
 
 ## Source Of Truth
 
@@ -85,19 +94,19 @@ Implemented:
 
 - `services/auth` is implemented.
 - Auth has login, register, logout, `/me`, parent-child linking, seed users, JWT cookie auth, and Prisma schema.
+- `services/ai` has service foundation, chat session/history/SSE routes, curated video recommendation routes, and feedback route.
+- AI has Prisma schema for chat sessions, messages, image jobs, and feedback.
 - `docker-compose.yml` has service wiring for frontend, auth, ai, rag, analytics, postgres, chromadb, ollama, comfyui, and traefik.
 - `services/rag` has a stub `/api/rag/retrieve` that returns empty chunks.
 - `services/analytics` has a stub `/api/analytics/event` that accepts events.
 
 Not implemented yet:
 
-- `services/ai/server.js` is only a stub.
-- `services/ai` has no `package.json`.
-- `services/ai` has no Prisma schema.
-- `services/ai` has no auth middleware copy.
-- `services/ai` has no real routes.
+- `services/ai` image generation endpoints are not implemented yet.
+- `services/ai` notes generation endpoint is not implemented yet.
+- `services/ai` quiz internal endpoints are not implemented yet.
 - `frontend` is still a stub.
-- `seed-data` does not yet contain PDFs, videos, or image assets.
+- `seed-data` does not yet contain PDFs or image assets.
 
 Known design/repo mismatch:
 
@@ -428,16 +437,15 @@ Failure to send analytics must never fail the user request.
 
 ## Next Coding Step
 
-Finish Part 2 verification before starting Part 3.
+Finish Part 3 verification before starting Part 4.
 
-Do not implement image, feedback, video, and quiz at the same time as chat.
+Do not implement image and quiz in the same PR as video/feedback.
 
 Next coding checkpoint:
 
-1. Run AI DB push against local Postgres.
-2. Start Auth, RAG, Analytics, Ollama, and AI together.
-3. Login as `arjun@demo.com`.
-4. Create a chat session with the login cookie.
-5. Send an SSE chat message.
-6. Verify history returns saved user and assistant messages.
-7. Confirm Analytics failure or stub behavior does not break chat.
+1. Start Postgres, Auth, Traefik, Analytics, and AI.
+2. Login as `arjun@demo.com`.
+3. Call `GET /api/ai/video/topics`.
+4. Call `GET /api/ai/video/photosynthesis`.
+5. Submit feedback against an assistant message after SSE chat is available.
+6. Confirm missing auth returns `401` for video and feedback routes.
