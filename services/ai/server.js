@@ -4,6 +4,7 @@ const { PrismaClient } = require('@prisma/client');
 const { TextDecoder } = require('util');
 
 const requireAuth = require('./middleware/auth');
+const videoLibrary = require('./data/video-library.json');
 
 const app = express();
 const prisma = new PrismaClient();
@@ -155,6 +156,107 @@ app.post('/api/ai/chat', ...studentOnly, asyncHandler(async (req, res) => {
   }
 }));
 
+app.get('/api/ai/video/topics', ...studentOnly, (_req, res) => {
+  const topics = videoLibrary.map(topic => {
+    const approvedVideos = getApprovedVideos(topic);
+    return {
+      topic: topic.topic,
+      label: topic.label,
+      subject: topic.subject,
+      gradeLevel: topic.gradeLevel,
+      description: topic.description,
+      videoCount: approvedVideos.length,
+      averageQualityScore: calculateAverageQualityScore(approvedVideos),
+    };
+  });
+
+  res.status(200).json(topics);
+});
+
+app.get('/api/ai/video/:topic', ...studentOnly, (req, res) => {
+  const topic = findVideoTopic(req.params.topic);
+  if (!topic) {
+    return res.status(404).json({ error: 'Video topic not found.' });
+  }
+
+  const videos = getApprovedVideos(topic);
+  res.status(200).json({
+    topic: topic.topic,
+    label: topic.label,
+    subject: topic.subject,
+    gradeLevel: topic.gradeLevel,
+    description: topic.description,
+    videos,
+  });
+});
+
+app.post('/api/ai/feedback', ...studentOnly, asyncHandler(async (req, res) => {
+  const { messageId, sessionId } = req.body || {};
+  const rating = Number(req.body?.rating);
+  const comment = normalizeOptionalComment(req.body?.comment);
+
+  if (!messageId) return res.status(400).json({ error: 'messageId is required.' });
+  if (!Number.isInteger(rating) || rating < 1 || rating > 5) {
+    return res.status(400).json({ error: 'rating must be an integer from 1 to 5.' });
+  }
+  if (comment === false) {
+    return res.status(400).json({ error: 'comment must be a string up to 1000 characters.' });
+  }
+
+  const message = await prisma.message.findFirst({
+    where: {
+      id: messageId,
+      role: 'assistant',
+      session: {
+        studentId: req.user.userId,
+      },
+    },
+    select: {
+      id: true,
+      sessionId: true,
+      session: {
+        select: {
+          id: true,
+          schoolId: true,
+          subject: true,
+        },
+      },
+    },
+  });
+
+  if (!message) return res.status(404).json({ error: 'Assistant message not found.' });
+  if (sessionId && sessionId !== message.sessionId) {
+    return res.status(400).json({ error: 'sessionId does not match message session.' });
+  }
+
+  const feedback = await prisma.feedback.create({
+    data: {
+      messageId: message.id,
+      studentId: req.user.userId,
+      schoolId: message.session.schoolId,
+      rating,
+      comment: comment || null,
+    },
+    select: { id: true },
+  });
+
+  fireAnalyticsEvent({
+    type: 'feedback_submitted',
+    studentId: req.user.userId,
+    schoolId: message.session.schoolId,
+    subject: message.session.subject,
+    sessionId: message.session.id,
+    metadata: {
+      messageId: message.id,
+      feedbackId: feedback.id,
+      rating,
+      hasComment: Boolean(comment),
+    },
+  });
+
+  res.status(201).json({ feedbackId: feedback.id });
+}));
+
 app.use('/api/ai', (_req, res) => {
   res.status(404).json({ error: 'AI endpoint not implemented yet.' });
 });
@@ -199,6 +301,32 @@ function normalizeMessage(message) {
   const trimmed = message.trim();
   if (!trimmed || trimmed.length > 500) return null;
   return trimmed;
+}
+
+function normalizeOptionalComment(comment) {
+  if (comment == null) return null;
+  if (typeof comment !== 'string') return false;
+  const trimmed = comment.trim();
+  if (trimmed.length > 1000) return false;
+  return trimmed || null;
+}
+
+function findVideoTopic(topic) {
+  if (!topic) return null;
+  const normalized = topic.trim().toLowerCase();
+  return videoLibrary.find(item => item.topic.toLowerCase() === normalized);
+}
+
+function getApprovedVideos(topic) {
+  return topic.videos
+    .filter(video => video.reviewStatus === 'approved_source')
+    .sort((a, b) => b.qualityScore - a.qualityScore);
+}
+
+function calculateAverageQualityScore(videos) {
+  if (!videos.length) return null;
+  const total = videos.reduce((sum, video) => sum + video.qualityScore, 0);
+  return Math.round(total / videos.length);
 }
 
 async function findOwnedSession(sessionId, studentId) {

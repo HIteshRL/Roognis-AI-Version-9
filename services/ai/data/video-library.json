@@ -1,0 +1,183 @@
+[
+  {
+    "topic": "photosynthesis",
+    "label": "Photosynthesis",
+    "subject": "Science",
+    "gradeLevel": "6-8",
+    "description": "Visual lessons that explain how plants make food using sunlight, water, carbon dioxide, and chlorophyll.",
+    "videos": [
+      {
+        "id": "photosynthesis-khan-academy",
+        "title": "Photosynthesis lessons",
+        "source": "Khan Academy",
+        "sourceType": "trusted_education_platform",
+        "url": "https://www.khanacademy.org/search?page_search_query=photosynthesis",
+        "embedUrl": null,
+        "thumbnailUrl": null,
+        "durationSeconds": null,
+        "viewCount": null,
+        "likeCount": null,
+        "language": "English",
+        "ageBand": "middle-school",
+        "qualityScore": 92,
+        "reviewStatus": "approved_source",
+        "selectionNotes": "Trusted non-profit educational platform. Exact video metrics can be refreshed later through a provider API."
+      },
+      {
+        "id": "photosynthesis-diksha",
+        "title": "Photosynthesis learning resources",
+        "source": "DIKSHA",
+        "sourceType": "official_education_platform",
+        "url": "https://diksha.gov.in/explore",
+        "embedUrl": null,
+        "thumbnailUrl": null,
+        "durationSeconds": null,
+        "viewCount": null,
+        "likeCount": null,
+        "language": "English",
+        "ageBand": "middle-school",
+        "qualityScore": 90,
+        "reviewStatus": "approved_source",
+        "selectionNotes": "Official Indian school education platform. Search within DIKSHA for the topic and grade-specific content."
+      }
+    ]
+  },
+  {
+    "topic": "fractions",
+    "label": "Fractions",
+    "subject": "Math",
+    "gradeLevel": "5-7",
+    "description": "Beginner-friendly lessons for understanding fractions, equivalent fractions, and basic operations.",
+    "videos": [
+      {
+        "id": "fractions-khan-academy",
+        "title": "Fractions lessons",
+        "source": "Khan Academy",
+        "sourceType": "trusted_education_platform",
+        "url": "https://www.khanacademy.org/search?page_search_query=fractions",
+        "embedUrl": null,
+        "thumbnailUrl": null,
+        "durationSeconds": null,
+        "viewCount": null,
+        "likeCount": null,
+        "language": "English",
+        "ageBand": "middle-school",
+        "qualityScore": 94,
+        "reviewStatus": "approved_source",
+        "selectionNotes": "Trusted math learning source with step-by-step explanations and practice support."
+      }
+    ]
+  },
+  {
+    "topic": "water-cycle",
+    "label": "Water Cycle",
+    "subject": "Science",
+    "gradeLevel": "5-7",
+    "description": "Visual lessons covering evaporation, condensation, precipitation, and collection.",
+    "videos": [
+      {
+        "id": "water-cycle-khan-academy",
+        "title": "Water cycle lessons",
+        "source": "Khan Academy",
+        "sourceType": "trusted_education_platform",
+        "url": "https://www.khanacademy.org/search?page_search_query=water%20cycle",
+        "embedUrl": null,
+        "thumbnailUrl": null,
+        "durationSeconds": null,
+        "viewCount": null,
+        "likeCount": null,
+        "language": "English",
+        "ageBand": "middle-school",
+        "qualityScore": 90,
+        "reviewStatus": "approved_source",
+        "selectionNotes": "Trusted education source suitable for concept introduction and revision."
+      },
+      {
+        "id": "water-cycle-diksha",
+        "title": "Water cycle learning resources",
+        "source": "DIKSHA",
+        "sourceType": "official_education_platform",
+        "url": "https://diksha.gov.in/explore",
+        "embedUrl": null,
+        "thumbnailUrl": null,
+        "durationSeconds": null,
+        "viewCount": null,
+        "likeCount": null,
+        "language": "English",
+        "ageBand": "middle-school",
+        "qualityScore": 89,
+        "reviewStatus": "approved_source",
+        "selectionNotes": "Official school-learning platform. Exact grade-specific content should be selected during final curation."
+      }
+    ]
+  },
+  {
+    "topic": "parts-of-speech",
+    "label": "Parts of Speech",
+    "subject": "English",
+    "gradeLevel": "5-8",
+    "description": "Grammar lessons for nouns, verbs, adjectives, adverbs, pronouns, and other parts of speech.",
+    "videos": [
+      {
+        "id": "parts-of-speech-khan-academy",
+        "title": "Grammar and parts of speech lessons",
+        "source": "Khan Academy",
+        "sourceType": "trusted_education_platform",
+        "url": "https://www.khanacademy.org/search?page_search_query=parts%20of%20speech",
+        "embedUrl": null,
+        "thumbnailUrl": null,
+        "durationSeconds": null,
+        "viewCount": null,
+        "likeCount": null,
+        "language": "English",
+        "ageBand": "middle-school",
+        "qualityScore": 91,
+        "reviewStatus": "approved_source",
+        "selectionNotes": "Trusted grammar source with structured lessons and learner-friendly explanations."
+      }
+    ]
+  },
+  {
+    "topic": "solar-system",
+    "label": "Solar System",
+    "subject": "Science",
+    "gradeLevel": "5-8",
+    "description": "Visual lessons about planets, orbits, the Sun, moons, and basic astronomy concepts.",
+    "videos": [
+      {
+        "id": "solar-system-khan-academy",
+        "title": "Solar system and astronomy lessons",
+        "source": "Khan Academy",
+        "sourceType": "trusted_education_platform",
+        "url": "https://www.khanacademy.org/search?page_search_query=solar%20system",
+        "embedUrl": null,
+        "thumbnailUrl": null,
+        "durationSeconds": null,
+        "viewCount": null,
+        "likeCount": null,
+        "language": "English",
+        "ageBand": "middle-school",
+        "qualityScore": 90,
+        "reviewStatus": "approved_source",
+        "selectionNotes": "Trusted source for concept videos. Exact video metrics can be added after provider API integration."
+      },
+      {
+        "id": "solar-system-diksha",
+        "title": "Solar system learning resources",
+        "source": "DIKSHA",
+        "sourceType": "official_education_platform",
+        "url": "https://diksha.gov.in/explore",
+        "embedUrl": null,
+        "thumbnailUrl": null,
+        "durationSeconds": null,
+        "viewCount": null,
+        "likeCount": null,
+        "language": "English",
+        "ageBand": "middle-school",
+        "qualityScore": 89,
+        "reviewStatus": "approved_source",
+        "selectionNotes": "Official school-learning platform. Final videos should be selected by grade and board."
+      }
+    ]
+  }
+]
