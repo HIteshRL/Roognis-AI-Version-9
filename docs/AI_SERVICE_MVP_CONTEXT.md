@@ -1,6 +1,6 @@
 # Roognis AI Service MVP Context
 
-Last updated: 2026-07-05
+Last updated: 2026-07-06
 
 This file is the working context for building the Roognis AI Service in small, safe parts. Use it before coding so we do not forget the current scope, accidentally overbuild production features, or mix old design documents with the latest MVP plan.
 
@@ -50,12 +50,22 @@ Completed:
   - Feedback stores rating/comment against assistant messages.
   - Feedback fires analytics events without blocking the response.
   - Video view/like metrics are placeholders until YouTube/DIKSHA/provider API refresh is added.
+- Part 4 implementation: Image MVP.
+  - Added `POST /api/ai/image`.
+  - Added `GET /api/ai/image/:jobId/status`.
+  - Added `GET /api/ai/images/:filename`.
+  - Image requests create queued DB jobs and return immediately.
+  - Node background processing submits a ComfyUI workflow, polls history, saves the image to file storage, and marks the job done.
+  - ComfyUI failures mark jobs failed with an explicit reason.
+  - Added timeout cleanup for stuck processing jobs.
+  - Image generation fires analytics events without blocking the response.
 
 Next:
 
 - Part 2 full integration verification with Postgres, Auth cookie, RAG stub, Analytics stub, and Ollama.
 - Part 3 Docker verification with Auth cookie and AI DB.
-- Then Part 4: Image MVP.
+- Part 4 Docker verification with Auth cookie, AI DB, file storage, and ComfyUI.
+- Then frontend integration and quiz-related backend work.
 
 ## Source Of Truth
 
@@ -85,7 +95,7 @@ git@github.com:chiru0631/roognis
 Current branch:
 
 ```text
-main
+feature/ai-image-mvp
 ```
 
 ## Current Repo State
@@ -94,7 +104,7 @@ Implemented:
 
 - `services/auth` is implemented.
 - Auth has login, register, logout, `/me`, parent-child linking, seed users, JWT cookie auth, and Prisma schema.
-- `services/ai` has service foundation, chat session/history/SSE routes, curated video recommendation routes, and feedback route.
+- `services/ai` has service foundation, chat session/history/SSE routes, curated video recommendation routes, feedback route, and image job routes.
 - AI has Prisma schema for chat sessions, messages, image jobs, and feedback.
 - `docker-compose.yml` has service wiring for frontend, auth, ai, rag, analytics, postgres, chromadb, ollama, comfyui, and traefik.
 - `services/rag` has a stub `/api/rag/retrieve` that returns empty chunks.
@@ -102,7 +112,6 @@ Implemented:
 
 Not implemented yet:
 
-- `services/ai` image generation endpoints are not implemented yet.
 - `services/ai` notes generation endpoint is not implemented yet.
 - `services/ai` quiz internal endpoints are not implemented yet.
 - `frontend` is still a stub.
@@ -437,15 +446,17 @@ Failure to send analytics must never fail the user request.
 
 ## Next Coding Step
 
-Finish Part 3 verification before starting Part 4.
+Finish Part 4 verification before starting frontend or quiz work.
 
-Do not implement image and quiz in the same PR as video/feedback.
+Do not implement quiz in the same PR as image MVP.
 
 Next coding checkpoint:
 
-1. Start Postgres, Auth, Traefik, Analytics, and AI.
-2. Login as `arjun@demo.com`.
-3. Call `GET /api/ai/video/topics`.
-4. Call `GET /api/ai/video/photosynthesis`.
-5. Submit feedback against an assistant message after SSE chat is available.
-6. Confirm missing auth returns `401` for video and feedback routes.
+1. Start Postgres, Auth, Traefik, Analytics, AI, and ComfyUI.
+2. Confirm AI DB push has created `image_jobs`.
+3. Login as `arjun@demo.com`.
+4. Call `POST /api/ai/image` with an educational diagram prompt.
+5. Poll `GET /api/ai/image/:jobId/status`.
+6. Confirm a missing or unready ComfyUI marks the job `failed` with a clear reason.
+7. When ComfyUI is ready, confirm status becomes `done` and `imageUrl` serves the generated PNG.
+8. Confirm missing auth returns `401` for image routes.

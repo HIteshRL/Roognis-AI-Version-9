@@ -2,6 +2,8 @@ const express = require('express');
 const cookieParser = require('cookie-parser');
 const { PrismaClient } = require('@prisma/client');
 const { TextDecoder } = require('util');
+const fs = require('fs/promises');
+const path = require('path');
 
 const requireAuth = require('./middleware/auth');
 const videoLibrary = require('./data/video-library.json');
@@ -13,6 +15,13 @@ const OLLAMA_URL = process.env.OLLAMA_URL || 'http://ollama:11434';
 const OLLAMA_MODEL = process.env.OLLAMA_MODEL || 'qwen2.5';
 const RAG_SERVICE_URL = process.env.RAG_SERVICE_URL || 'http://rag:3003';
 const ANALYTICS_URL = process.env.ANALYTICS_URL || 'http://analytics:3004';
+const COMFYUI_URL = process.env.COMFYUI_URL || 'http://comfyui:8188';
+const FILE_STORAGE_PATH = process.env.FILE_STORAGE_PATH || path.join(__dirname, 'storage');
+const IMAGE_OUTPUT_DIR = path.join(FILE_STORAGE_PATH, 'images');
+const IMAGE_PROMPT_MAX_LENGTH = 300;
+const IMAGE_JOB_TIMEOUT_MS = Number(process.env.IMAGE_JOB_TIMEOUT_MS || 5 * 60 * 1000);
+const IMAGE_POLL_INTERVAL_MS = Number(process.env.IMAGE_POLL_INTERVAL_MS || 3000);
+const IMAGE_TIMEOUT_CLEANUP_MS = Number(process.env.IMAGE_TIMEOUT_CLEANUP_MS || 2 * 60 * 1000);
 
 app.disable('x-powered-by');
 app.use(express.json({ limit: '1mb' }));
@@ -257,6 +266,95 @@ app.post('/api/ai/feedback', ...studentOnly, asyncHandler(async (req, res) => {
   res.status(201).json({ feedbackId: feedback.id });
 }));
 
+app.post('/api/ai/image', ...studentOnly, asyncHandler(async (req, res) => {
+  const prompt = normalizeImagePrompt(req.body?.prompt);
+  if (!prompt) {
+    return res.status(400).json({ error: `prompt is required and must be 1-${IMAGE_PROMPT_MAX_LENGTH} characters.` });
+  }
+
+  const job = await prisma.imageJob.create({
+    data: {
+      studentId: req.user.userId,
+      schoolId: req.user.schoolId,
+      prompt,
+      status: 'queued',
+    },
+    select: {
+      id: true,
+      status: true,
+    },
+  });
+
+  runImageJobInBackground(job.id);
+
+  res.status(202).json({
+    jobId: job.id,
+    status: job.status,
+  });
+}));
+
+app.get('/api/ai/image/:jobId/status', ...studentOnly, asyncHandler(async (req, res) => {
+  if (!isValidUuid(req.params.jobId)) {
+    return res.status(404).json({ error: 'Image job not found.' });
+  }
+
+  const job = await prisma.imageJob.findFirst({
+    where: {
+      id: req.params.jobId,
+      studentId: req.user.userId,
+    },
+    select: {
+      id: true,
+      status: true,
+      imageUrl: true,
+      failureReason: true,
+      createdAt: true,
+      updatedAt: true,
+    },
+  });
+
+  if (!job) return res.status(404).json({ error: 'Image job not found.' });
+
+  res.status(200).json({
+    jobId: job.id,
+    status: job.status,
+    imageUrl: job.imageUrl,
+    failureReason: job.failureReason,
+    createdAt: job.createdAt,
+    updatedAt: job.updatedAt,
+  });
+}));
+
+app.get('/api/ai/images/:filename', ...studentOnly, asyncHandler(async (req, res) => {
+  const filename = req.params.filename;
+  if (!isValidImageFilename(filename)) {
+    return res.status(404).json({ error: 'Image not found.' });
+  }
+
+  const jobId = filename.slice(0, -'.png'.length);
+  const job = await prisma.imageJob.findFirst({
+    where: {
+      id: jobId,
+      studentId: req.user.userId,
+      status: 'done',
+    },
+    select: {
+      id: true,
+    },
+  });
+
+  if (!job) return res.status(404).json({ error: 'Image not found.' });
+
+  const imagePath = path.join(IMAGE_OUTPUT_DIR, filename);
+  try {
+    const image = await fs.readFile(imagePath);
+    res.type('png').status(200).send(image);
+  } catch (err) {
+    if (err.code === 'ENOENT') return res.status(404).json({ error: 'Image not found.' });
+    throw err;
+  }
+}));
+
 app.use('/api/ai', (_req, res) => {
   res.status(404).json({ error: 'AI endpoint not implemented yet.' });
 });
@@ -274,8 +372,16 @@ const server = app.listen(PORT, () => {
   console.log(`[ai] Service running on :${PORT}`);
 });
 
+const imageTimeoutTimer = setInterval(() => {
+  cleanupStaleImageJobs().catch(err => {
+    console.warn('[ai] image timeout cleanup failed:', err.message);
+  });
+}, IMAGE_TIMEOUT_CLEANUP_MS);
+imageTimeoutTimer.unref?.();
+
 async function shutdown(signal) {
   console.log(`[ai] ${signal} received. Shutting down...`);
+  clearInterval(imageTimeoutTimer);
   server.close(async () => {
     await prisma.$disconnect();
     process.exit(0);
@@ -311,6 +417,13 @@ function normalizeOptionalComment(comment) {
   return trimmed || null;
 }
 
+function normalizeImagePrompt(prompt) {
+  if (typeof prompt !== 'string') return null;
+  const trimmed = prompt.trim();
+  if (!trimmed || trimmed.length > IMAGE_PROMPT_MAX_LENGTH) return null;
+  return trimmed;
+}
+
 function findVideoTopic(topic) {
   if (!topic) return null;
   const normalized = topic.trim().toLowerCase();
@@ -327,6 +440,237 @@ function calculateAverageQualityScore(videos) {
   if (!videos.length) return null;
   const total = videos.reduce((sum, video) => sum + video.qualityScore, 0);
   return Math.round(total / videos.length);
+}
+
+function runImageJobInBackground(jobId) {
+  setImmediate(() => {
+    processImageJob(jobId).catch(err => {
+      console.error(`[ai] image job ${jobId} failed unexpectedly:`, err);
+    });
+  });
+}
+
+async function processImageJob(jobId) {
+  const claimed = await prisma.imageJob.updateMany({
+    where: {
+      id: jobId,
+      status: 'queued',
+    },
+    data: {
+      status: 'processing',
+      failureReason: null,
+    },
+  });
+
+  if (claimed.count !== 1) return;
+
+  const job = await prisma.imageJob.findUnique({
+    where: { id: jobId },
+    select: {
+      id: true,
+      prompt: true,
+      studentId: true,
+      schoolId: true,
+    },
+  });
+
+  if (!job) return;
+
+  try {
+    await fs.mkdir(IMAGE_OUTPUT_DIR, { recursive: true });
+
+    const promptId = await submitComfyPrompt(job.prompt, job.id);
+    const outputImage = await waitForComfyOutput(promptId);
+    const image = await downloadComfyImage(outputImage);
+    const filename = `${job.id}.png`;
+    const imageUrl = `/api/ai/images/${filename}`;
+
+    await fs.writeFile(path.join(IMAGE_OUTPUT_DIR, filename), image);
+
+    await prisma.imageJob.update({
+      where: { id: job.id },
+      data: {
+        status: 'done',
+        imageUrl,
+        failureReason: null,
+      },
+    });
+
+    fireAnalyticsEvent({
+      type: 'image_generated',
+      studentId: job.studentId,
+      schoolId: job.schoolId,
+      metadata: {
+        jobId: job.id,
+        promptLength: job.prompt.length,
+      },
+    });
+  } catch (err) {
+    console.warn(`[ai] image job ${job.id} failed:`, err.message);
+    await prisma.imageJob.update({
+      where: { id: job.id },
+      data: {
+        status: 'failed',
+        failureReason: buildImageFailureReason(err),
+      },
+    }).catch(updateErr => {
+      console.warn(`[ai] image job ${job.id} failure update failed:`, updateErr.message);
+    });
+  }
+}
+
+async function submitComfyPrompt(prompt, jobId) {
+  const response = await fetchJsonWithTimeout(
+    `${COMFYUI_URL}/api/prompt`,
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(buildComfyWorkflow(prompt, jobId)),
+    },
+    10000
+  );
+
+  const promptId = response?.prompt_id;
+  if (!promptId) throw new Error('ComfyUI did not return a prompt_id.');
+  return promptId;
+}
+
+function buildComfyWorkflow(prompt, jobId) {
+  return {
+    prompt: {
+      '4': {
+        class_type: 'CheckpointLoaderSimple',
+        inputs: { ckpt_name: 'v1-5-pruned-emaonly.ckpt' },
+      },
+      '5': {
+        class_type: 'EmptyLatentImage',
+        inputs: { width: 512, height: 512, batch_size: 1 },
+      },
+      '6': {
+        class_type: 'CLIPTextEncode',
+        inputs: {
+          clip: ['4', 1],
+          text: `${prompt}, educational, colorful, diagram style`,
+        },
+      },
+      '7': {
+        class_type: 'CLIPTextEncode',
+        inputs: {
+          clip: ['4', 1],
+          text: 'ugly, blurry, nsfw, text, watermark, low quality',
+        },
+      },
+      '3': {
+        class_type: 'KSampler',
+        inputs: {
+          model: ['4', 0],
+          positive: ['6', 0],
+          negative: ['7', 0],
+          latent_image: ['5', 0],
+          seed: 42,
+          steps: 20,
+          cfg: 7,
+          sampler_name: 'euler',
+          scheduler: 'normal',
+          denoise: 1,
+        },
+      },
+      '8': {
+        class_type: 'VAEDecode',
+        inputs: { samples: ['3', 0], vae: ['4', 2] },
+      },
+      '9': {
+        class_type: 'SaveImage',
+        inputs: {
+          filename_prefix: `roognis_${jobId}`,
+          images: ['8', 0],
+        },
+      },
+    },
+  };
+}
+
+async function waitForComfyOutput(promptId) {
+  const deadline = Date.now() + IMAGE_JOB_TIMEOUT_MS;
+
+  while (Date.now() < deadline) {
+    const history = await fetchJsonWithTimeout(
+      `${COMFYUI_URL}/history/${encodeURIComponent(promptId)}`,
+      { method: 'GET' },
+      10000
+    );
+    const image = findComfyOutputImage(history, promptId);
+    if (image) return image;
+    await sleep(IMAGE_POLL_INTERVAL_MS);
+  }
+
+  throw new Error('Image generation timed out.');
+}
+
+function findComfyOutputImage(history, promptId) {
+  const promptHistory = history?.[promptId] || history;
+  const outputs = promptHistory?.outputs;
+  if (!outputs || typeof outputs !== 'object') return null;
+
+  for (const output of Object.values(outputs)) {
+    if (!Array.isArray(output?.images)) continue;
+    const image = output.images.find(item => typeof item?.filename === 'string');
+    if (image) return image;
+  }
+
+  return null;
+}
+
+async function downloadComfyImage(image) {
+  if (!image?.filename) throw new Error('ComfyUI output image is missing a filename.');
+
+  const params = new URLSearchParams({
+    filename: image.filename,
+    type: image.type || 'output',
+  });
+  if (image.subfolder) params.set('subfolder', image.subfolder);
+
+  return fetchBufferWithTimeout(`${COMFYUI_URL}/view?${params.toString()}`, 30000);
+}
+
+async function cleanupStaleImageJobs() {
+  const cutoff = new Date(Date.now() - IMAGE_JOB_TIMEOUT_MS);
+  const result = await prisma.imageJob.updateMany({
+    where: {
+      status: 'processing',
+      updatedAt: {
+        lt: cutoff,
+      },
+    },
+    data: {
+      status: 'failed',
+      failureReason: 'Image generation timed out.',
+    },
+  });
+
+  if (result.count > 0) {
+    console.warn(`[ai] marked ${result.count} stale image job(s) as failed`);
+  }
+}
+
+function buildImageFailureReason(err) {
+  if (err?.name === 'AbortError') return 'Image generation service timed out.';
+  const message = typeof err?.message === 'string' ? err.message : '';
+  if (!message) return 'Image generation failed.';
+  if (message.length > 500) return `${message.slice(0, 497)}...`;
+  return message;
+}
+
+function isValidImageFilename(filename) {
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\.png$/i.test(filename);
+}
+
+function isValidUuid(value) {
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(value);
+}
+
+function sleep(ms) {
+  return new Promise(resolve => setTimeout(resolve, ms));
 }
 
 async function findOwnedSession(sessionId, studentId) {
@@ -503,6 +847,27 @@ async function fetchJsonWithTimeout(url, options, timeoutMs) {
     }
 
     return response.json();
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
+async function fetchBufferWithTimeout(url, timeoutMs) {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), timeoutMs);
+
+  try {
+    const response = await fetch(url, {
+      method: 'GET',
+      signal: controller.signal,
+    });
+
+    if (!response.ok) {
+      const errorBody = await response.text().catch(() => '');
+      throw new Error(`HTTP ${response.status}: ${errorBody}`);
+    }
+
+    return Buffer.from(await response.arrayBuffer());
   } finally {
     clearTimeout(timeout);
   }
