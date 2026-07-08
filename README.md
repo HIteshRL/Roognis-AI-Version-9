@@ -153,6 +153,8 @@ GEMINI_TEXT_MODEL=<your Gemini text model>
 GEMINI_IMAGE_MODEL=gemini-3.1-flash-image
 ```
 
+Child-safety behavior is enforced inside the AI Service. Chat requests are checked before RAG/Gemini, Gemini chat uses strict safety settings, model text is validated before the service streams SSE chunks to the browser, and image prompts are limited to safe educational diagram requests.
+
 ### 2. Optional: run local image generation fallback
 
 Only needed if you set `IMAGE_PROVIDER=comfyui`.
@@ -242,6 +244,8 @@ router.get('/api/ai/chat/:id/history', requireAuth, requireAuth.requireRole('stu
 **Key dependencies:** `express`, `@prisma/client`, `node-cron`, `cookie-parser`, `jsonwebtoken`
 
 See `roognis-ai-design-complete.pdf → LLD v3 → AI Service :3002` for full endpoint specs and system prompt. The current MVP defaults to Gemini for text and image generation while keeping Ollama/ComfyUI fallback support.
+
+The AI Service owns MVP child safety: it blocks unsafe chat/image prompts before provider calls, validates generated chat output before SSE streaming, returns a safe refusal for blocked content, and emits non-blocking safety analytics events.
 
 ### RAG Service — What to Build
 

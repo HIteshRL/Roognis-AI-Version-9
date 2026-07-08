@@ -1,12 +1,18 @@
 const express = require('express');
 const cookieParser = require('cookie-parser');
 const { PrismaClient } = require('@prisma/client');
-const { TextDecoder } = require('util');
 const fs = require('fs/promises');
 const path = require('path');
 
 const requireAuth = require('./middleware/auth');
 const videoLibrary = require('./data/video-library.json');
+const {
+  SAFE_REFUSAL_MESSAGE,
+  validateStudentMessageSafety,
+  validateGeneratedTextSafety,
+  validateImagePromptSafety,
+  getGeminiSafetySettings,
+} = require('./safety');
 
 const app = express();
 const prisma = new PrismaClient();
@@ -92,6 +98,22 @@ app.post('/api/ai/chat', ...studentOnly, asyncHandler(async (req, res) => {
   const session = await findOwnedSession(sessionId, req.user.userId);
   if (!session) return res.status(404).json({ error: 'Chat session not found.' });
 
+  const inputSafety = validateStudentMessageSafety(message);
+  if (!inputSafety.allowed) {
+    setSseHeaders(res);
+    sendSseEvent(res, 'status', { status: 'refused' });
+    sendSseEvent(res, 'token', { text: SAFE_REFUSAL_MESSAGE });
+    sendSseEvent(res, 'done', '[DONE]');
+    fireSafetyAnalyticsEvent('safety_input_blocked', req, {
+      sessionId: session.id,
+      subject: session.subject,
+      category: inputSafety.category,
+      reason: inputSafety.reason,
+      promptLength: message.length,
+    });
+    return res.end();
+  }
+
   const history = await loadRecentHistory(session.id);
   const userMessage = await prisma.message.create({
     data: {
@@ -126,7 +148,7 @@ app.post('/api/ai/chat', ...studentOnly, asyncHandler(async (req, res) => {
       question: message,
     });
 
-    const assistantContent = await streamLlmResponse({
+    const llmResult = await streamLlmResponse({
       prompt,
       res,
       signal: streamController.signal,
@@ -135,6 +157,17 @@ app.post('/api/ai/chat', ...studentOnly, asyncHandler(async (req, res) => {
 
     if (clientClosed) return;
 
+    if (llmResult.safetyBlocked) {
+      fireSafetyAnalyticsEvent('safety_output_blocked', req, {
+        sessionId: session.id,
+        subject: session.subject,
+        category: llmResult.safety?.category,
+        reason: llmResult.safety?.reason,
+        outputLength: llmResult.originalContentLength,
+      });
+    }
+
+    const assistantContent = llmResult.content;
     const finalAssistantContent = assistantContent.trim() || "I don't have information on that yet.";
     const assistantMessage = await prisma.message.create({
       data: {
@@ -276,6 +309,16 @@ app.post('/api/ai/image', ...studentOnly, asyncHandler(async (req, res) => {
   const prompt = normalizeImagePrompt(req.body?.prompt);
   if (!prompt) {
     return res.status(400).json({ error: `prompt is required and must be 1-${IMAGE_PROMPT_MAX_LENGTH} characters.` });
+  }
+
+  const promptSafety = validateImagePromptSafety(prompt);
+  if (!promptSafety.allowed) {
+    fireSafetyAnalyticsEvent('image_prompt_blocked', req, {
+      category: promptSafety.category,
+      reason: promptSafety.reason,
+      promptLength: prompt.length,
+    });
+    return res.status(400).json({ error: SAFE_REFUSAL_MESSAGE });
   }
 
   const job = await prisma.imageJob.create({
@@ -559,6 +602,12 @@ async function generateGeminiImage(prompt) {
             text: buildGeminiImagePrompt(prompt),
           },
         ],
+        response_format: {
+          type: 'image',
+          mime_type: 'image/png',
+          aspect_ratio: '1:1',
+          image_size: '1K',
+        },
       }),
     },
     IMAGE_JOB_TIMEOUT_MS
@@ -883,21 +932,57 @@ async function streamLlmResponse({ prompt, res, signal, isClientClosed }) {
 }
 
 async function streamGeminiResponse({ prompt, res, signal, isClientClosed }) {
+  const geminiResult = await generateGeminiTextResponse({ prompt, signal });
+
+  if (geminiResult.safetyBlocked) {
+    const content = await streamTextAsSse(SAFE_REFUSAL_MESSAGE, res, isClientClosed);
+    return {
+      content,
+      safetyBlocked: true,
+      safety: geminiResult.safety,
+      originalContentLength: geminiResult.originalContentLength,
+    };
+  }
+
+  const outputSafety = validateGeneratedTextSafety(geminiResult.content);
+  if (!outputSafety.allowed) {
+    const content = await streamTextAsSse(SAFE_REFUSAL_MESSAGE, res, isClientClosed);
+    return {
+      content,
+      safetyBlocked: true,
+      safety: outputSafety,
+      originalContentLength: geminiResult.content.length,
+    };
+  }
+
+  const content = await streamTextAsSse(geminiResult.content, res, isClientClosed);
+  return {
+    content,
+    safetyBlocked: false,
+  };
+}
+
+async function generateGeminiTextResponse({ prompt, signal }) {
   ensureGeminiApiKey('chat completion');
 
-  const response = await fetch(`${GEMINI_API_BASE_URL}/interactions?alt=sse`, {
+  const model = normalizeGeminiModelName(GEMINI_TEXT_MODEL);
+  const response = await fetch(`${GEMINI_API_BASE_URL}/models/${encodeURIComponent(model)}:generateContent`, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
       'x-goog-api-key': GEMINI_API_KEY,
     },
     body: JSON.stringify({
-      model: GEMINI_TEXT_MODEL,
-      input: prompt,
-      stream: true,
-      generation_config: {
+      contents: [
+        {
+          role: 'user',
+          parts: [{ text: prompt }],
+        },
+      ],
+      generationConfig: {
         temperature: 0.2,
       },
+      safetySettings: getGeminiSafetySettings(),
     }),
     signal,
   });
@@ -907,70 +992,79 @@ async function streamGeminiResponse({ prompt, res, signal, isClientClosed }) {
     throw new Error(`Gemini request failed with ${response.status}: ${errorBody}`);
   }
 
-  if (!response.body) {
-    throw new Error('Gemini response did not include a stream.');
+  const parsed = await response.json();
+  const promptBlockReason = parsed?.promptFeedback?.blockReason;
+  if (promptBlockReason) {
+    return {
+      content: '',
+      safetyBlocked: true,
+      safety: {
+        category: 'gemini_prompt_filter',
+        reason: `Gemini blocked the prompt: ${promptBlockReason}`,
+      },
+      originalContentLength: 0,
+    };
   }
 
-  const decoder = new TextDecoder();
-  let buffer = '';
-  let assistantContent = '';
-
-  for await (const chunk of response.body) {
-    if (isClientClosed()) break;
-
-    buffer += decoder.decode(chunk, { stream: true });
-    const events = buffer.split('\n\n');
-    buffer = events.pop() || '';
-
-    for (const event of events) {
-      const text = extractGeminiTextDelta(event);
-      if (!text) continue;
-      assistantContent += text;
-      sendSseEvent(res, 'token', { text });
-    }
+  const candidate = parsed?.candidates?.[0];
+  if (candidate?.finishReason === 'SAFETY') {
+    return {
+      content: '',
+      safetyBlocked: true,
+      safety: {
+        category: 'gemini_response_filter',
+        reason: 'Gemini blocked the response for safety.',
+      },
+      originalContentLength: 0,
+    };
   }
 
-  if (buffer.trim()) {
-    const text = extractGeminiTextDelta(buffer);
-    if (text) {
-      assistantContent += text;
-      sendSseEvent(res, 'token', { text });
-    }
-  }
-
-  return assistantContent;
+  const content = extractGeminiCandidateText(candidate);
+  return {
+    content,
+    safetyBlocked: false,
+    originalContentLength: content.length,
+  };
 }
 
-function extractGeminiTextDelta(sseEvent) {
-  const dataLines = sseEvent
-    .split('\n')
-    .filter(line => line.startsWith('data:'))
-    .map(line => line.slice('data:'.length).trim());
+function extractGeminiCandidateText(candidate) {
+  const parts = candidate?.content?.parts;
+  if (!Array.isArray(parts)) return '';
+  return parts.map(part => part.text || '').join('');
+}
 
-  if (!dataLines.length) return '';
-
-  const data = dataLines.join('\n');
-  if (!data || data === '[DONE]') return '';
-
-  let parsed;
-  try {
-    parsed = JSON.parse(data);
-  } catch (_err) {
-    return '';
+async function streamTextAsSse(text, res, isClientClosed) {
+  const chunks = chunkText(text, 120);
+  for (const chunk of chunks) {
+    if (isClientClosed()) break;
+    sendSseEvent(res, 'token', { text: chunk });
   }
-  if (parsed?.event_type === 'step.delta' && parsed?.delta?.type === 'text') {
-    return parsed.delta.text || '';
-  }
-  if (parsed?.delta?.type === 'text') return parsed.delta.text || '';
-  if (typeof parsed?.delta?.text === 'string') return parsed.delta.text;
-  if (typeof parsed?.text === 'string') return parsed.text;
+  return text;
+}
 
-  const parts = parsed?.candidates?.[0]?.content?.parts;
-  if (Array.isArray(parts)) {
-    return parts.map(part => part.text || '').join('');
+function chunkText(text, maxLength) {
+  const chunks = [];
+  let remaining = text;
+  while (remaining.length > maxLength) {
+    const splitAt = findChunkBoundary(remaining, maxLength);
+    chunks.push(remaining.slice(0, splitAt));
+    remaining = remaining.slice(splitAt);
   }
+  if (remaining) chunks.push(remaining);
+  return chunks;
+}
 
-  return '';
+function findChunkBoundary(text, maxLength) {
+  const window = text.slice(0, maxLength + 1);
+  const lastSpace = window.lastIndexOf(' ');
+  if (lastSpace > Math.floor(maxLength * 0.6)) return lastSpace + 1;
+  return maxLength;
+}
+
+function normalizeGeminiModelName(model) {
+  const trimmed = String(model || '').trim();
+  if (trimmed.startsWith('models/')) return trimmed.slice('models/'.length);
+  return trimmed;
 }
 
 function ensureGeminiApiKey(action) {
@@ -986,7 +1080,7 @@ async function streamOllamaResponse({ prompt, res, signal, isClientClosed }) {
     body: JSON.stringify({
       model: OLLAMA_MODEL,
       prompt,
-      stream: true,
+      stream: false,
     }),
     signal,
   });
@@ -996,38 +1090,24 @@ async function streamOllamaResponse({ prompt, res, signal, isClientClosed }) {
     throw new Error(`Ollama request failed with ${response.status}: ${errorBody}`);
   }
 
-  const decoder = new TextDecoder();
-  let buffer = '';
-  let assistantContent = '';
-
-  for await (const chunk of response.body) {
-    if (isClientClosed()) break;
-
-    buffer += decoder.decode(chunk, { stream: true });
-    const lines = buffer.split('\n');
-    buffer = lines.pop() || '';
-
-    for (const line of lines) {
-      if (!line.trim()) continue;
-
-      const parsed = JSON.parse(line);
-      if (parsed.response) {
-        assistantContent += parsed.response;
-        sendSseEvent(res, 'token', { text: parsed.response });
-      }
-      if (parsed.done) break;
-    }
+  const parsed = await response.json();
+  const content = parsed?.response || '';
+  const outputSafety = validateGeneratedTextSafety(content);
+  if (!outputSafety.allowed) {
+    const safeContent = await streamTextAsSse(SAFE_REFUSAL_MESSAGE, res, isClientClosed);
+    return {
+      content: safeContent,
+      safetyBlocked: true,
+      safety: outputSafety,
+      originalContentLength: content.length,
+    };
   }
 
-  if (buffer.trim()) {
-    const parsed = JSON.parse(buffer);
-    if (parsed.response) {
-      assistantContent += parsed.response;
-      sendSseEvent(res, 'token', { text: parsed.response });
-    }
-  }
-
-  return assistantContent;
+  const safeContent = await streamTextAsSse(content, res, isClientClosed);
+  return {
+    content: safeContent,
+    safetyBlocked: false,
+  };
 }
 
 async function fetchJsonWithTimeout(url, options, timeoutMs) {
@@ -1083,5 +1163,21 @@ function fireAnalyticsEvent(event) {
     3000
   ).catch(err => {
     console.warn('[ai] analytics event failed:', err.message);
+  });
+}
+
+function fireSafetyAnalyticsEvent(type, req, metadata = {}) {
+  fireAnalyticsEvent({
+    type,
+    studentId: req.user?.userId,
+    schoolId: req.user?.schoolId,
+    subject: metadata.subject,
+    sessionId: metadata.sessionId,
+    metadata: {
+      category: metadata.category || 'unknown',
+      reason: metadata.reason || 'Safety policy blocked the request.',
+      promptLength: metadata.promptLength,
+      outputLength: metadata.outputLength,
+    },
   });
 }

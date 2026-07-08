@@ -25,14 +25,15 @@ The MVP should support the investor/user journey:
 As of 2026-07-08:
 
 - Completed through Phase 4 backend implementation.
-- Current working branch is `feature/gemini-providers`.
+- Current working branch is `feature/ai-safety-layer`.
 - Auth and infrastructure are implemented.
 - AI Service foundation, chat/session/history/SSE, video topics, feedback, image jobs, and Gemini provider switches are implemented.
 - Chat now preserves the RAG-first flow and calls Gemini as the default LLM provider.
 - Image generation now uses Gemini as the default image provider while keeping ComfyUI fallback support.
+- AI Service now has an MVP child-safety layer for chat input, chat output, Gemini safety settings, image prompts, safe refusals, and safety analytics events.
 - Frontend is intentionally not part of the current work because another person will handle it later.
 - We are not focusing on video generation. Existing video work is curated educational video metadata/routes only.
-- Next backend priority is child-safety hardening inside `services/ai` before real Gemini key testing/demo use.
+- Next backend priority is real Gemini key verification and end-to-end AI Service integration testing.
 
 Phase status:
 
@@ -41,7 +42,7 @@ Phase 1: Auth + infra                         Done
 Phase 2: AI service foundation                Done
 Phase 3: Chat core / RAG prompt / SSE         Done
 Phase 4: Video + feedback + image MVP         Done
-Phase 5: Safety + Gemini integration verify   Next
+Phase 5: Safety + Gemini integration verify   Safety done, Gemini verify pending
 Phase 6: Frontend MVP integration             Later / separate owner
 Phase 7: Final demo polish + remaining gaps   Later
 ```
@@ -90,12 +91,21 @@ Completed:
   - Added `IMAGE_PROVIDER=gemini` image path while preserving image job/status/image URL APIs.
   - Kept Ollama and ComfyUI as optional local fallback providers.
   - Updated Docker Compose so the default stack does not wait for Ollama or ComfyUI.
+- Child-safety layer implementation.
+  - Added chat input safety checks before RAG/Gemini.
+  - Added image prompt safety checks before image job creation.
+  - Added safe refusal response for blocked prompts/outputs.
+  - Changed Gemini chat to generate internally, validate, then server-stream approved SSE chunks.
+  - Added strict Gemini safety settings for chat generation.
+  - Added output validation for Gemini and Ollama fallback responses before streaming to the student.
+  - Added non-blocking analytics events for blocked chat input, blocked chat output, and blocked image prompts.
+  - Added focused Node tests for chat safety, output safety, image prompt safety, and Gemini safety settings.
 
 Next:
 
-- Part 2 full integration verification with Postgres, Auth cookie, RAG stub, Analytics stub, and Gemini.
-- Part 3 Docker verification with Auth cookie and AI DB.
-- Part 4 Docker verification with Auth cookie, AI DB, file storage, and Gemini image generation.
+- Full integration verification with Postgres, Auth cookie, RAG stub, Analytics stub, and a real `GEMINI_API_KEY`.
+- Docker verification for chat, feedback, video routes, image jobs, file storage, and Gemini image generation.
+- Tighten Gemini image API request shape if real-key testing shows the current provider contract needs adjustment.
 - Then frontend integration and quiz-related backend work.
 
 ## Child Safety Plan
@@ -161,15 +171,15 @@ feature/ai-safety-layer
 
 Safety implementation checklist:
 
-1. Add `validateStudentMessageSafety(message)`.
-2. Add `validateImagePromptSafety(prompt)`.
-3. Add shared safe refusal helpers.
-4. Add Gemini safety settings helper.
-5. Change Gemini chat path from direct provider streaming to generate-then-server-stream.
-6. Add output safety validation before saving/streaming assistant text.
-7. Add analytics events for blocked inputs/outputs.
-8. Add local tests or curl checks for safe/refused chat and image prompts.
-9. Update README and this context with the verified safety behavior.
+1. Add `validateStudentMessageSafety(message)`. Done.
+2. Add `validateImagePromptSafety(prompt)`. Done.
+3. Add shared safe refusal helpers. Done.
+4. Add Gemini safety settings helper. Done.
+5. Change Gemini chat path from direct provider streaming to generate-then-server-stream. Done.
+6. Add output safety validation before saving/streaming assistant text. Done.
+7. Add analytics events for blocked inputs/outputs. Done.
+8. Add local tests or curl checks for safe/refused chat and image prompts. Local safety tests done; full endpoint verification pending real Gemini key.
+9. Update README and this context with the safety behavior. Done.
 
 ## Source Of Truth
 
@@ -199,7 +209,7 @@ git@github.com:chiru0631/roognis
 Current branch:
 
 ```text
-feature/gemini-providers
+feature/ai-safety-layer
 ```
 
 ## Current Repo State
@@ -210,6 +220,7 @@ Implemented:
 - Auth has login, register, logout, `/me`, parent-child linking, seed users, JWT cookie auth, and Prisma schema.
 - `services/ai` has service foundation, chat session/history/SSE routes, curated video recommendation routes, feedback route, and image job routes.
 - `services/ai` defaults to Gemini for chat and image generation, with Ollama/ComfyUI fallback support.
+- `services/ai` has MVP child-safety checks for chat input, chat output, image prompts, Gemini strict chat safety settings, and safety analytics events.
 - AI has Prisma schema for chat sessions, messages, image jobs, and feedback.
 - `docker-compose.yml` has service wiring for frontend, auth, ai, rag, analytics, postgres, chromadb, and traefik, with Ollama/ComfyUI available behind the optional `local-ai` profile.
 - `services/rag` has a stub `/api/rag/retrieve` that returns empty chunks.
