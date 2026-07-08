@@ -20,6 +20,32 @@ The MVP should support the investor/user journey:
 8. Student can create an image job and poll status.
 9. AI Service fires analytics events without blocking the user flow.
 
+## Current Snapshot
+
+As of 2026-07-08:
+
+- Completed through Phase 4 backend implementation.
+- Current working branch is `feature/gemini-providers`.
+- Auth and infrastructure are implemented.
+- AI Service foundation, chat/session/history/SSE, video topics, feedback, image jobs, and Gemini provider switches are implemented.
+- Chat now preserves the RAG-first flow and calls Gemini as the default LLM provider.
+- Image generation now uses Gemini as the default image provider while keeping ComfyUI fallback support.
+- Frontend is intentionally not part of the current work because another person will handle it later.
+- We are not focusing on video generation. Existing video work is curated educational video metadata/routes only.
+- Next backend priority is child-safety hardening inside `services/ai` before real Gemini key testing/demo use.
+
+Phase status:
+
+```text
+Phase 1: Auth + infra                         Done
+Phase 2: AI service foundation                Done
+Phase 3: Chat core / RAG prompt / SSE         Done
+Phase 4: Video + feedback + image MVP         Done
+Phase 5: Safety + Gemini integration verify   Next
+Phase 6: Frontend MVP integration             Later / separate owner
+Phase 7: Final demo polish + remaining gaps   Later
+```
+
 ## Progress
 
 Completed:
@@ -71,6 +97,79 @@ Next:
 - Part 3 Docker verification with Auth cookie and AI DB.
 - Part 4 Docker verification with Auth cookie, AI DB, file storage, and Gemini image generation.
 - Then frontend integration and quiz-related backend work.
+
+## Child Safety Plan
+
+Safety belongs in the AI Service for the MVP because the AI Service owns the student prompt, RAG prompt construction, Gemini request, generated answer, image prompt, image generation request, persistence, and analytics event.
+
+Do not move this to RAG, Auth, or Analytics for MVP:
+
+- Auth identifies the user and role.
+- RAG retrieves school context.
+- Analytics records events.
+- AI Service decides whether a student request can safely reach Gemini and whether a model output can be returned.
+
+Required AI Service safety controls before real student/demo usage:
+
+1. Input safety guard for chat.
+   - Reject clearly unsafe or non-school requests before RAG/Gemini.
+   - Block sexual content, self-harm, hate/harassment, weapons, drugs, graphic violence, adult content, and unsafe instructions.
+   - Return a safe, age-appropriate refusal instead of calling Gemini.
+
+2. Strong tutor prompt rules.
+   - Identify Roognis as a safe school tutor.
+   - Require age-appropriate language.
+   - Require answers to stay educational and school-related.
+   - Require answers to use only retrieved RAG context.
+   - If context is missing or irrelevant, answer: `I don't have information on that yet.`
+
+3. Gemini safety settings.
+   - Configure strict model safety thresholds for harassment, hate speech, sexually explicit content, dangerous content, and any other supported safety categories.
+   - Keep these settings in one helper so chat and image paths are easy to audit.
+
+4. Output safety guard for chat.
+   - Prefer non-stream Gemini generation internally for child safety, then stream approved text from our server as SSE chunks.
+   - This avoids sending unsafe partial tokens directly to the browser before validation.
+   - If output fails safety validation, do not save it as an assistant answer; return a safe refusal.
+
+5. Image prompt safety guard.
+   - Allow only educational diagram-style prompts for MVP.
+   - Reject requests involving realistic people, children, celebrities, sexual content, violence, gore, weapons, drugs, hate, brand/logo generation, or photo-realistic identity content.
+   - Wrap allowed prompts with a safe educational diagram instruction before calling Gemini image generation.
+
+6. Analytics and audit events.
+   - Fire non-blocking analytics events for blocked prompts and blocked outputs.
+   - Suggested event types: `safety_input_blocked`, `safety_output_blocked`, `image_prompt_blocked`.
+   - Store enough metadata for debugging without storing sensitive unsafe text verbatim unless explicitly needed later.
+
+7. Safe defaults.
+   - If safety code is unsure, refuse safely.
+   - If Gemini API key/model is missing, fail clearly.
+   - Do not bypass RAG grounding for chat.
+
+Safety refusal copy:
+
+```text
+I can only help with safe school-related learning questions. Try asking me about a topic from your class.
+```
+
+Recommended next implementation branch:
+
+```text
+feature/ai-safety-layer
+```
+
+Safety implementation checklist:
+
+1. Add `validateStudentMessageSafety(message)`.
+2. Add `validateImagePromptSafety(prompt)`.
+3. Add shared safe refusal helpers.
+4. Add Gemini safety settings helper.
+5. Change Gemini chat path from direct provider streaming to generate-then-server-stream.
+6. Add output safety validation before saving/streaming assistant text.
+7. Add analytics events for blocked inputs/outputs.
+8. Add local tests or curl checks for safe/refused chat and image prompts.
+9. Update README and this context with the verified safety behavior.
 
 ## Source Of Truth
 
