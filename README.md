@@ -23,8 +23,9 @@ Data Layer
   └── Docker Volume        — /data (PDFs, generated images, seed videos)
 
 AI Layer
-  ├── Ollama     :11434    — Qwen2.5 (text chat) + nomic-embed-text (RAG embeddings)
-  └── ComfyUI    :8188     — Stable Diffusion v1.5 (educational image generation)
+  ├── Gemini API          — default MVP provider for chat + image generation
+  ├── Ollama     :11434   — optional local fallback for text chat
+  └── ComfyUI    :8188    — optional local fallback for image generation
 ```
 
 ### Request Flow — AI Chat
@@ -35,7 +36,7 @@ Student sends message
     → AI Service validates JWT (student role, ≤500 chars)
     → AI Service fetches top-5 NCERT chunks from RAG Service
     → AI Service builds prompt: system rules + NCERT context + last 10 messages
-    → Ollama streams response tokens via SSE → browser renders live
+    → Gemini streams response tokens via SSE → browser renders live
     → AI Service saves messages + fires analytics event (async, non-blocking)
 ```
 
@@ -115,13 +116,13 @@ parent_student  — parent_id, student_id  (composite PK, idempotent linking)
 
 ### Infrastructure
 
-**`docker-compose.yml`** — 10-service orchestration covering the full stack. All services have health checks. Startup order is enforced via `depends_on` conditions — services wait for Postgres to be healthy, and AI/RAG wait for Ollama to have models loaded.
+**`docker-compose.yml`** — 10-service orchestration covering the full stack. The default MVP path uses Gemini, so Ollama and ComfyUI are behind the optional `local-ai` profile.
 
 **`traefik/traefik.yml`** — API gateway config. Routes requests by path prefix to the correct service. CORS configured for `localhost:3000`. Dashboard available at `http://localhost:8080`.
 
-**`scripts/ollama-init.sh`** — Container entrypoint for Ollama. Starts the server, waits for the API, pulls `qwen2.5` and `nomic-embed-text` (idempotent — skips if already in the volume), then keeps the container alive.
+**`scripts/ollama-init.sh`** — Optional local fallback entrypoint for Ollama. Starts the server, waits for the API, pulls `qwen2.5` and `nomic-embed-text` (idempotent — skips if already in the volume), then keeps the container alive.
 
-**`scripts/comfyui-model-download.sh`** — One-time script to download the Stable Diffusion v1.5 checkpoint (~4GB) into the `comfy_models` Docker volume. Run once before demo day.
+**`scripts/comfyui-model-download.sh`** — Optional local fallback script to download the Stable Diffusion v1.5 checkpoint (~4GB) into the `comfy_models` Docker volume.
 
 **`kubernetes/`** — Full Kubernetes manifests for production deployment. See [Cloud Deployment](#cloud-deployment--kubernetes) below.
 
@@ -131,8 +132,9 @@ parent_student  — parent_id, student_id  (composite PK, idempotent linking)
 
 ### Prerequisites
 
-- Docker Desktop (with Compose v2)
-- ~15GB free disk space (Ollama models: ~8GB, SD model: ~4GB, containers: ~3GB)
+- Docker Desktop or Docker + `docker-compose`
+- Gemini API key for MVP chat and image generation
+- More disk space only if using optional local Ollama/ComfyUI fallback
 
 ### 1. Configure environment
 
@@ -141,9 +143,21 @@ cp .env.example .env
 # Edit .env — set a strong JWT_SECRET at minimum
 ```
 
-### 2. Download the image generation model (one-time, ~4GB)
+Add Gemini settings:
 
-Run this the night before your first demo. It downloads Stable Diffusion v1.5 into a Docker volume.
+```sh
+LLM_PROVIDER=gemini
+IMAGE_PROVIDER=gemini
+GEMINI_API_KEY=<your Gemini API key>
+GEMINI_TEXT_MODEL=<your Gemini text model>
+GEMINI_IMAGE_MODEL=gemini-3.1-flash-image
+```
+
+Child-safety behavior is enforced inside the AI Service. Chat requests are checked before RAG/Gemini, Gemini chat uses strict safety settings, model text is validated before the service streams SSE chunks to the browser, and image prompts are limited to safe educational diagram requests.
+
+### 2. Optional: run local image generation fallback
+
+Only needed if you set `IMAGE_PROVIDER=comfyui`.
 
 ```sh
 sh scripts/comfyui-model-download.sh
@@ -151,10 +165,16 @@ sh scripts/comfyui-model-download.sh
 
 ### 3. Start the full stack
 
-First run takes **30–60 minutes** — Ollama downloads ~8GB of model weights and seeds the database. Every subsequent run takes ~30 seconds.
+Default Gemini MVP startup should be lightweight because it does not pull local LLM/image models.
 
 ```sh
-docker compose up --build
+docker-compose up --build
+```
+
+To use local fallback providers:
+
+```sh
+LLM_PROVIDER=ollama IMAGE_PROVIDER=comfyui docker-compose --profile local-ai up --build
 ```
 
 ### 4. Access the application
@@ -164,7 +184,7 @@ docker compose up --build
 | Frontend | http://localhost:3000 | Main application |
 | API Gateway | http://localhost:80 | All API requests |
 | Traefik Dashboard | http://localhost:8080 | Live routing view |
-| ComfyUI | http://localhost:8188 | Image generation UI |
+| ComfyUI | http://localhost:8188 | Optional local image generation UI |
 
 Log in with any demo account. The browser will redirect you to the correct dashboard for your role.
 
@@ -186,10 +206,15 @@ DATABASE_URL=postgresql://postgres:<DB_PASSWORD>@postgres:5432/roognis?schema=<y
 JWT_SECRET=<from .env>
 
 # Internal service URLs
-OLLAMA_URL=http://ollama:11434
+LLM_PROVIDER=gemini
+IMAGE_PROVIDER=gemini
+GEMINI_API_KEY=<from .env>
+GEMINI_TEXT_MODEL=<from .env>
+GEMINI_IMAGE_MODEL=<from .env>
+OLLAMA_URL=http://ollama:11434        # optional fallback
 RAG_SERVICE_URL=http://rag:3003
 ANALYTICS_URL=http://analytics:3004
-COMFYUI_URL=http://comfyui:8188
+COMFYUI_URL=http://comfyui:8188       # optional fallback
 
 # File storage
 FILE_STORAGE_PATH=/app/storage
@@ -218,7 +243,9 @@ router.get('/api/ai/chat/:id/history', requireAuth, requireAuth.requireRole('stu
 **Schema:** `ai_db` — chat_sessions, messages, image_jobs, feedback  
 **Key dependencies:** `express`, `@prisma/client`, `node-cron`, `cookie-parser`, `jsonwebtoken`
 
-See `roognis-ai-design-complete.pdf → LLD v3 → AI Service :3002` for full endpoint specs, SSE streaming implementation, ComfyUI workflow JSON, and system prompt.
+See `roognis-ai-design-complete.pdf → LLD v3 → AI Service :3002` for full endpoint specs and system prompt. The current MVP defaults to Gemini for text and image generation while keeping Ollama/ComfyUI fallback support.
+
+The AI Service owns MVP child safety: it blocks unsafe chat/image prompts before provider calls, validates generated chat output before SSE streaming, returns a safe refusal for blocked content, and emits non-blocking safety analytics events.
 
 ### RAG Service — What to Build
 
@@ -261,9 +288,9 @@ After login, redirect based on `role`:
 You do not need to restart the entire stack when working on one service:
 
 ```sh
-docker compose up --build ai       # Rebuild and restart only the AI service
-docker compose logs -f analytics   # Follow logs for a specific service
-docker compose ps                  # Check status of all services
+docker-compose up --build ai       # Rebuild and restart only the AI service
+docker-compose logs -f analytics   # Follow logs for a specific service
+docker-compose ps                  # Check status of all services
 ```
 
 ---
@@ -323,7 +350,7 @@ The entire stack is designed for zero-code cloud migration. Every infrastructure
 |---|---|---|---|
 | PostgreSQL | `postgres` container | AWS RDS | Change `DATABASE_URL` in K8s Secret |
 | Vector DB | ChromaDB container | Pinecone | Set `PINECONE_API_KEY` + `PINECONE_ENV` |
-| LLM | Ollama (local GPU) | Anthropic Claude API | Set `ANTHROPIC_API_KEY` |
+| LLM | Gemini API | Ollama fallback or other hosted API | Set `LLM_PROVIDER` + provider key |
 | File Storage | Docker volume | AWS S3 | Set `AWS_S3_BUCKET` + credentials |
 | Routing | Traefik (Docker labels) | nginx-ingress | `kubernetes/ingress/ingress.yaml` |
 
@@ -370,8 +397,8 @@ roognis/
 ├── traefik/
 │   └── traefik.yml                 — API gateway config + CORS
 ├── scripts/
-│   ├── ollama-init.sh              — Pull AI models on first boot
-│   └── comfyui-model-download.sh  — Download SD v1.5 model (one-time)
+│   ├── ollama-init.sh              — Pull local fallback AI models
+│   └── comfyui-model-download.sh  — Download local fallback SD v1.5 model
 ├── seed-data/                      — Add NCERT PDFs + demo videos here
 ├── services/
 │   ├── auth/                       ✅ Complete — Auth & identity service

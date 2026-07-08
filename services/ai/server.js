@@ -1,18 +1,30 @@
 const express = require('express');
 const cookieParser = require('cookie-parser');
 const { PrismaClient } = require('@prisma/client');
-const { TextDecoder } = require('util');
 const fs = require('fs/promises');
 const path = require('path');
 
 const requireAuth = require('./middleware/auth');
 const videoLibrary = require('./data/video-library.json');
+const {
+  SAFE_REFUSAL_MESSAGE,
+  validateStudentMessageSafety,
+  validateGeneratedTextSafety,
+  validateImagePromptSafety,
+  getGeminiSafetySettings,
+} = require('./safety');
 
 const app = express();
 const prisma = new PrismaClient();
 const PORT = process.env.PORT || 3002;
+const LLM_PROVIDER = normalizeProvider(process.env.LLM_PROVIDER, ['gemini', 'ollama'], 'gemini');
+const IMAGE_PROVIDER = normalizeProvider(process.env.IMAGE_PROVIDER, ['gemini', 'comfyui'], 'gemini');
 const OLLAMA_URL = process.env.OLLAMA_URL || 'http://ollama:11434';
 const OLLAMA_MODEL = process.env.OLLAMA_MODEL || 'qwen2.5';
+const GEMINI_API_KEY = process.env.GEMINI_API_KEY || '';
+const GEMINI_API_BASE_URL = process.env.GEMINI_API_BASE_URL || 'https://generativelanguage.googleapis.com/v1beta';
+const GEMINI_TEXT_MODEL = process.env.GEMINI_TEXT_MODEL || 'gemini-3.5-flash';
+const GEMINI_IMAGE_MODEL = process.env.GEMINI_IMAGE_MODEL || 'gemini-3.1-flash-image';
 const RAG_SERVICE_URL = process.env.RAG_SERVICE_URL || 'http://rag:3003';
 const ANALYTICS_URL = process.env.ANALYTICS_URL || 'http://analytics:3004';
 const COMFYUI_URL = process.env.COMFYUI_URL || 'http://comfyui:8188';
@@ -86,6 +98,22 @@ app.post('/api/ai/chat', ...studentOnly, asyncHandler(async (req, res) => {
   const session = await findOwnedSession(sessionId, req.user.userId);
   if (!session) return res.status(404).json({ error: 'Chat session not found.' });
 
+  const inputSafety = validateStudentMessageSafety(message);
+  if (!inputSafety.allowed) {
+    setSseHeaders(res);
+    sendSseEvent(res, 'status', { status: 'refused' });
+    sendSseEvent(res, 'token', { text: SAFE_REFUSAL_MESSAGE });
+    sendSseEvent(res, 'done', '[DONE]');
+    fireSafetyAnalyticsEvent('safety_input_blocked', req, {
+      sessionId: session.id,
+      subject: session.subject,
+      category: inputSafety.category,
+      reason: inputSafety.reason,
+      promptLength: message.length,
+    });
+    return res.end();
+  }
+
   const history = await loadRecentHistory(session.id);
   const userMessage = await prisma.message.create({
     data: {
@@ -120,7 +148,7 @@ app.post('/api/ai/chat', ...studentOnly, asyncHandler(async (req, res) => {
       question: message,
     });
 
-    const assistantContent = await streamOllamaResponse({
+    const llmResult = await streamLlmResponse({
       prompt,
       res,
       signal: streamController.signal,
@@ -129,6 +157,17 @@ app.post('/api/ai/chat', ...studentOnly, asyncHandler(async (req, res) => {
 
     if (clientClosed) return;
 
+    if (llmResult.safetyBlocked) {
+      fireSafetyAnalyticsEvent('safety_output_blocked', req, {
+        sessionId: session.id,
+        subject: session.subject,
+        category: llmResult.safety?.category,
+        reason: llmResult.safety?.reason,
+        outputLength: llmResult.originalContentLength,
+      });
+    }
+
+    const assistantContent = llmResult.content;
     const finalAssistantContent = assistantContent.trim() || "I don't have information on that yet.";
     const assistantMessage = await prisma.message.create({
       data: {
@@ -272,6 +311,16 @@ app.post('/api/ai/image', ...studentOnly, asyncHandler(async (req, res) => {
     return res.status(400).json({ error: `prompt is required and must be 1-${IMAGE_PROMPT_MAX_LENGTH} characters.` });
   }
 
+  const promptSafety = validateImagePromptSafety(prompt);
+  if (!promptSafety.allowed) {
+    fireSafetyAnalyticsEvent('image_prompt_blocked', req, {
+      category: promptSafety.category,
+      reason: promptSafety.reason,
+      promptLength: prompt.length,
+    });
+    return res.status(400).json({ error: SAFE_REFUSAL_MESSAGE });
+  }
+
   const job = await prisma.imageJob.create({
     data: {
       studentId: req.user.userId,
@@ -395,6 +444,12 @@ function asyncHandler(handler) {
   return (req, res, next) => Promise.resolve(handler(req, res, next)).catch(next);
 }
 
+function normalizeProvider(provider, allowedProviders, fallbackProvider) {
+  const normalized = typeof provider === 'string' ? provider.trim().toLowerCase() : '';
+  if (allowedProviders.includes(normalized)) return normalized;
+  return fallbackProvider;
+}
+
 function normalizeSubject(subject) {
   if (typeof subject !== 'string') return null;
   const trimmed = subject.trim();
@@ -479,9 +534,7 @@ async function processImageJob(jobId) {
   try {
     await fs.mkdir(IMAGE_OUTPUT_DIR, { recursive: true });
 
-    const promptId = await submitComfyPrompt(job.prompt, job.id);
-    const outputImage = await waitForComfyOutput(promptId);
-    const image = await downloadComfyImage(outputImage);
+    const image = await generateImage(job);
     const filename = `${job.id}.png`;
     const imageUrl = `/api/ai/images/${filename}`;
 
@@ -502,6 +555,7 @@ async function processImageJob(jobId) {
       schoolId: job.schoolId,
       metadata: {
         jobId: job.id,
+        imageProvider: IMAGE_PROVIDER,
         promptLength: job.prompt.length,
       },
     });
@@ -517,6 +571,94 @@ async function processImageJob(jobId) {
       console.warn(`[ai] image job ${job.id} failure update failed:`, updateErr.message);
     });
   }
+}
+
+async function generateImage(job) {
+  if (IMAGE_PROVIDER === 'gemini') {
+    return generateGeminiImage(job.prompt);
+  }
+
+  const promptId = await submitComfyPrompt(job.prompt, job.id);
+  const outputImage = await waitForComfyOutput(promptId);
+  return downloadComfyImage(outputImage);
+}
+
+async function generateGeminiImage(prompt) {
+  ensureGeminiApiKey('image generation');
+
+  const response = await fetchJsonWithTimeout(
+    `${GEMINI_API_BASE_URL}/interactions`,
+    {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-goog-api-key': GEMINI_API_KEY,
+      },
+      body: JSON.stringify({
+        model: GEMINI_IMAGE_MODEL,
+        input: [
+          {
+            type: 'text',
+            text: buildGeminiImagePrompt(prompt),
+          },
+        ],
+        response_format: {
+          type: 'image',
+          mime_type: 'image/png',
+          aspect_ratio: '1:1',
+          image_size: '1K',
+        },
+      }),
+    },
+    IMAGE_JOB_TIMEOUT_MS
+  );
+
+  const imageData = extractGeminiImageData(response);
+  if (!imageData) throw new Error('Gemini did not return image data.');
+
+  return decodeBase64Image(imageData);
+}
+
+function buildGeminiImagePrompt(prompt) {
+  return [
+    'Create a clear educational diagram for a school student.',
+    `Topic: ${prompt}`,
+    'Use a colorful, simple, textbook-friendly visual style.',
+    'Make the main concept visually obvious.',
+    'Avoid distracting decorative elements, unsafe content, watermarks, and brand logos.',
+  ].join('\n');
+}
+
+function extractGeminiImageData(response) {
+  if (typeof response?.output_image?.data === 'string') return response.output_image.data;
+  if (typeof response?.outputImage?.data === 'string') return response.outputImage.data;
+
+  const seen = new Set();
+  const queue = [response];
+  while (queue.length) {
+    const current = queue.shift();
+    if (!current || typeof current !== 'object' || seen.has(current)) continue;
+    seen.add(current);
+
+    const mimeType = current.mime_type || current.mimeType || '';
+    if (
+      typeof current.data === 'string' &&
+      (current.type === 'image' || String(mimeType).startsWith('image/'))
+    ) {
+      return current.data;
+    }
+
+    for (const value of Object.values(current)) {
+      if (value && typeof value === 'object') queue.push(value);
+    }
+  }
+
+  return null;
+}
+
+function decodeBase64Image(imageData) {
+  const base64 = imageData.includes(',') ? imageData.split(',').pop() : imageData;
+  return Buffer.from(base64, 'base64');
 }
 
 async function submitComfyPrompt(prompt, jobId) {
@@ -781,6 +923,156 @@ function sendSseEvent(res, event, data) {
   res.write(`data: ${payload}\n\n`);
 }
 
+async function streamLlmResponse({ prompt, res, signal, isClientClosed }) {
+  if (LLM_PROVIDER === 'gemini') {
+    return streamGeminiResponse({ prompt, res, signal, isClientClosed });
+  }
+
+  return streamOllamaResponse({ prompt, res, signal, isClientClosed });
+}
+
+async function streamGeminiResponse({ prompt, res, signal, isClientClosed }) {
+  const geminiResult = await generateGeminiTextResponse({ prompt, signal });
+
+  if (geminiResult.safetyBlocked) {
+    const content = await streamTextAsSse(SAFE_REFUSAL_MESSAGE, res, isClientClosed);
+    return {
+      content,
+      safetyBlocked: true,
+      safety: geminiResult.safety,
+      originalContentLength: geminiResult.originalContentLength,
+    };
+  }
+
+  const outputSafety = validateGeneratedTextSafety(geminiResult.content);
+  if (!outputSafety.allowed) {
+    const content = await streamTextAsSse(SAFE_REFUSAL_MESSAGE, res, isClientClosed);
+    return {
+      content,
+      safetyBlocked: true,
+      safety: outputSafety,
+      originalContentLength: geminiResult.content.length,
+    };
+  }
+
+  const content = await streamTextAsSse(geminiResult.content, res, isClientClosed);
+  return {
+    content,
+    safetyBlocked: false,
+  };
+}
+
+async function generateGeminiTextResponse({ prompt, signal }) {
+  ensureGeminiApiKey('chat completion');
+
+  const model = normalizeGeminiModelName(GEMINI_TEXT_MODEL);
+  const response = await fetch(`${GEMINI_API_BASE_URL}/models/${encodeURIComponent(model)}:generateContent`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'x-goog-api-key': GEMINI_API_KEY,
+    },
+    body: JSON.stringify({
+      contents: [
+        {
+          role: 'user',
+          parts: [{ text: prompt }],
+        },
+      ],
+      generationConfig: {
+        temperature: 0.2,
+      },
+      safetySettings: getGeminiSafetySettings(),
+    }),
+    signal,
+  });
+
+  if (!response.ok) {
+    const errorBody = await response.text().catch(() => '');
+    throw new Error(`Gemini request failed with ${response.status}: ${errorBody}`);
+  }
+
+  const parsed = await response.json();
+  const promptBlockReason = parsed?.promptFeedback?.blockReason;
+  if (promptBlockReason) {
+    return {
+      content: '',
+      safetyBlocked: true,
+      safety: {
+        category: 'gemini_prompt_filter',
+        reason: `Gemini blocked the prompt: ${promptBlockReason}`,
+      },
+      originalContentLength: 0,
+    };
+  }
+
+  const candidate = parsed?.candidates?.[0];
+  if (candidate?.finishReason === 'SAFETY') {
+    return {
+      content: '',
+      safetyBlocked: true,
+      safety: {
+        category: 'gemini_response_filter',
+        reason: 'Gemini blocked the response for safety.',
+      },
+      originalContentLength: 0,
+    };
+  }
+
+  const content = extractGeminiCandidateText(candidate);
+  return {
+    content,
+    safetyBlocked: false,
+    originalContentLength: content.length,
+  };
+}
+
+function extractGeminiCandidateText(candidate) {
+  const parts = candidate?.content?.parts;
+  if (!Array.isArray(parts)) return '';
+  return parts.map(part => part.text || '').join('');
+}
+
+async function streamTextAsSse(text, res, isClientClosed) {
+  const chunks = chunkText(text, 120);
+  for (const chunk of chunks) {
+    if (isClientClosed()) break;
+    sendSseEvent(res, 'token', { text: chunk });
+  }
+  return text;
+}
+
+function chunkText(text, maxLength) {
+  const chunks = [];
+  let remaining = text;
+  while (remaining.length > maxLength) {
+    const splitAt = findChunkBoundary(remaining, maxLength);
+    chunks.push(remaining.slice(0, splitAt));
+    remaining = remaining.slice(splitAt);
+  }
+  if (remaining) chunks.push(remaining);
+  return chunks;
+}
+
+function findChunkBoundary(text, maxLength) {
+  const window = text.slice(0, maxLength + 1);
+  const lastSpace = window.lastIndexOf(' ');
+  if (lastSpace > Math.floor(maxLength * 0.6)) return lastSpace + 1;
+  return maxLength;
+}
+
+function normalizeGeminiModelName(model) {
+  const trimmed = String(model || '').trim();
+  if (trimmed.startsWith('models/')) return trimmed.slice('models/'.length);
+  return trimmed;
+}
+
+function ensureGeminiApiKey(action) {
+  if (!GEMINI_API_KEY) {
+    throw new Error(`GEMINI_API_KEY is required for Gemini ${action}.`);
+  }
+}
+
 async function streamOllamaResponse({ prompt, res, signal, isClientClosed }) {
   const response = await fetch(`${OLLAMA_URL}/api/generate`, {
     method: 'POST',
@@ -788,7 +1080,7 @@ async function streamOllamaResponse({ prompt, res, signal, isClientClosed }) {
     body: JSON.stringify({
       model: OLLAMA_MODEL,
       prompt,
-      stream: true,
+      stream: false,
     }),
     signal,
   });
@@ -798,38 +1090,24 @@ async function streamOllamaResponse({ prompt, res, signal, isClientClosed }) {
     throw new Error(`Ollama request failed with ${response.status}: ${errorBody}`);
   }
 
-  const decoder = new TextDecoder();
-  let buffer = '';
-  let assistantContent = '';
-
-  for await (const chunk of response.body) {
-    if (isClientClosed()) break;
-
-    buffer += decoder.decode(chunk, { stream: true });
-    const lines = buffer.split('\n');
-    buffer = lines.pop() || '';
-
-    for (const line of lines) {
-      if (!line.trim()) continue;
-
-      const parsed = JSON.parse(line);
-      if (parsed.response) {
-        assistantContent += parsed.response;
-        sendSseEvent(res, 'token', { text: parsed.response });
-      }
-      if (parsed.done) break;
-    }
+  const parsed = await response.json();
+  const content = parsed?.response || '';
+  const outputSafety = validateGeneratedTextSafety(content);
+  if (!outputSafety.allowed) {
+    const safeContent = await streamTextAsSse(SAFE_REFUSAL_MESSAGE, res, isClientClosed);
+    return {
+      content: safeContent,
+      safetyBlocked: true,
+      safety: outputSafety,
+      originalContentLength: content.length,
+    };
   }
 
-  if (buffer.trim()) {
-    const parsed = JSON.parse(buffer);
-    if (parsed.response) {
-      assistantContent += parsed.response;
-      sendSseEvent(res, 'token', { text: parsed.response });
-    }
-  }
-
-  return assistantContent;
+  const safeContent = await streamTextAsSse(content, res, isClientClosed);
+  return {
+    content: safeContent,
+    safetyBlocked: false,
+  };
 }
 
 async function fetchJsonWithTimeout(url, options, timeoutMs) {
@@ -843,7 +1121,8 @@ async function fetchJsonWithTimeout(url, options, timeoutMs) {
     });
 
     if (!response.ok) {
-      throw new Error(`HTTP ${response.status}`);
+      const errorBody = await response.text().catch(() => '');
+      throw new Error(`HTTP ${response.status}: ${errorBody}`);
     }
 
     return response.json();
@@ -884,5 +1163,21 @@ function fireAnalyticsEvent(event) {
     3000
   ).catch(err => {
     console.warn('[ai] analytics event failed:', err.message);
+  });
+}
+
+function fireSafetyAnalyticsEvent(type, req, metadata = {}) {
+  fireAnalyticsEvent({
+    type,
+    studentId: req.user?.userId,
+    schoolId: req.user?.schoolId,
+    subject: metadata.subject,
+    sessionId: metadata.sessionId,
+    metadata: {
+      category: metadata.category || 'unknown',
+      reason: metadata.reason || 'Safety policy blocked the request.',
+      promptLength: metadata.promptLength,
+      outputLength: metadata.outputLength,
+    },
   });
 }
