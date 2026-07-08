@@ -11,8 +11,14 @@ const videoLibrary = require('./data/video-library.json');
 const app = express();
 const prisma = new PrismaClient();
 const PORT = process.env.PORT || 3002;
+const LLM_PROVIDER = normalizeProvider(process.env.LLM_PROVIDER, ['gemini', 'ollama'], 'gemini');
+const IMAGE_PROVIDER = normalizeProvider(process.env.IMAGE_PROVIDER, ['gemini', 'comfyui'], 'gemini');
 const OLLAMA_URL = process.env.OLLAMA_URL || 'http://ollama:11434';
 const OLLAMA_MODEL = process.env.OLLAMA_MODEL || 'qwen2.5';
+const GEMINI_API_KEY = process.env.GEMINI_API_KEY || '';
+const GEMINI_API_BASE_URL = process.env.GEMINI_API_BASE_URL || 'https://generativelanguage.googleapis.com/v1beta';
+const GEMINI_TEXT_MODEL = process.env.GEMINI_TEXT_MODEL || 'gemini-3.5-flash';
+const GEMINI_IMAGE_MODEL = process.env.GEMINI_IMAGE_MODEL || 'gemini-3.1-flash-image';
 const RAG_SERVICE_URL = process.env.RAG_SERVICE_URL || 'http://rag:3003';
 const ANALYTICS_URL = process.env.ANALYTICS_URL || 'http://analytics:3004';
 const COMFYUI_URL = process.env.COMFYUI_URL || 'http://comfyui:8188';
@@ -120,7 +126,7 @@ app.post('/api/ai/chat', ...studentOnly, asyncHandler(async (req, res) => {
       question: message,
     });
 
-    const assistantContent = await streamOllamaResponse({
+    const assistantContent = await streamLlmResponse({
       prompt,
       res,
       signal: streamController.signal,
@@ -395,6 +401,12 @@ function asyncHandler(handler) {
   return (req, res, next) => Promise.resolve(handler(req, res, next)).catch(next);
 }
 
+function normalizeProvider(provider, allowedProviders, fallbackProvider) {
+  const normalized = typeof provider === 'string' ? provider.trim().toLowerCase() : '';
+  if (allowedProviders.includes(normalized)) return normalized;
+  return fallbackProvider;
+}
+
 function normalizeSubject(subject) {
   if (typeof subject !== 'string') return null;
   const trimmed = subject.trim();
@@ -479,9 +491,7 @@ async function processImageJob(jobId) {
   try {
     await fs.mkdir(IMAGE_OUTPUT_DIR, { recursive: true });
 
-    const promptId = await submitComfyPrompt(job.prompt, job.id);
-    const outputImage = await waitForComfyOutput(promptId);
-    const image = await downloadComfyImage(outputImage);
+    const image = await generateImage(job);
     const filename = `${job.id}.png`;
     const imageUrl = `/api/ai/images/${filename}`;
 
@@ -502,6 +512,7 @@ async function processImageJob(jobId) {
       schoolId: job.schoolId,
       metadata: {
         jobId: job.id,
+        imageProvider: IMAGE_PROVIDER,
         promptLength: job.prompt.length,
       },
     });
@@ -517,6 +528,88 @@ async function processImageJob(jobId) {
       console.warn(`[ai] image job ${job.id} failure update failed:`, updateErr.message);
     });
   }
+}
+
+async function generateImage(job) {
+  if (IMAGE_PROVIDER === 'gemini') {
+    return generateGeminiImage(job.prompt);
+  }
+
+  const promptId = await submitComfyPrompt(job.prompt, job.id);
+  const outputImage = await waitForComfyOutput(promptId);
+  return downloadComfyImage(outputImage);
+}
+
+async function generateGeminiImage(prompt) {
+  ensureGeminiApiKey('image generation');
+
+  const response = await fetchJsonWithTimeout(
+    `${GEMINI_API_BASE_URL}/interactions`,
+    {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-goog-api-key': GEMINI_API_KEY,
+      },
+      body: JSON.stringify({
+        model: GEMINI_IMAGE_MODEL,
+        input: [
+          {
+            type: 'text',
+            text: buildGeminiImagePrompt(prompt),
+          },
+        ],
+      }),
+    },
+    IMAGE_JOB_TIMEOUT_MS
+  );
+
+  const imageData = extractGeminiImageData(response);
+  if (!imageData) throw new Error('Gemini did not return image data.');
+
+  return decodeBase64Image(imageData);
+}
+
+function buildGeminiImagePrompt(prompt) {
+  return [
+    'Create a clear educational diagram for a school student.',
+    `Topic: ${prompt}`,
+    'Use a colorful, simple, textbook-friendly visual style.',
+    'Make the main concept visually obvious.',
+    'Avoid distracting decorative elements, unsafe content, watermarks, and brand logos.',
+  ].join('\n');
+}
+
+function extractGeminiImageData(response) {
+  if (typeof response?.output_image?.data === 'string') return response.output_image.data;
+  if (typeof response?.outputImage?.data === 'string') return response.outputImage.data;
+
+  const seen = new Set();
+  const queue = [response];
+  while (queue.length) {
+    const current = queue.shift();
+    if (!current || typeof current !== 'object' || seen.has(current)) continue;
+    seen.add(current);
+
+    const mimeType = current.mime_type || current.mimeType || '';
+    if (
+      typeof current.data === 'string' &&
+      (current.type === 'image' || String(mimeType).startsWith('image/'))
+    ) {
+      return current.data;
+    }
+
+    for (const value of Object.values(current)) {
+      if (value && typeof value === 'object') queue.push(value);
+    }
+  }
+
+  return null;
+}
+
+function decodeBase64Image(imageData) {
+  const base64 = imageData.includes(',') ? imageData.split(',').pop() : imageData;
+  return Buffer.from(base64, 'base64');
 }
 
 async function submitComfyPrompt(prompt, jobId) {
@@ -781,6 +874,111 @@ function sendSseEvent(res, event, data) {
   res.write(`data: ${payload}\n\n`);
 }
 
+async function streamLlmResponse({ prompt, res, signal, isClientClosed }) {
+  if (LLM_PROVIDER === 'gemini') {
+    return streamGeminiResponse({ prompt, res, signal, isClientClosed });
+  }
+
+  return streamOllamaResponse({ prompt, res, signal, isClientClosed });
+}
+
+async function streamGeminiResponse({ prompt, res, signal, isClientClosed }) {
+  ensureGeminiApiKey('chat completion');
+
+  const response = await fetch(`${GEMINI_API_BASE_URL}/interactions?alt=sse`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'x-goog-api-key': GEMINI_API_KEY,
+    },
+    body: JSON.stringify({
+      model: GEMINI_TEXT_MODEL,
+      input: prompt,
+      stream: true,
+      generation_config: {
+        temperature: 0.2,
+      },
+    }),
+    signal,
+  });
+
+  if (!response.ok) {
+    const errorBody = await response.text().catch(() => '');
+    throw new Error(`Gemini request failed with ${response.status}: ${errorBody}`);
+  }
+
+  if (!response.body) {
+    throw new Error('Gemini response did not include a stream.');
+  }
+
+  const decoder = new TextDecoder();
+  let buffer = '';
+  let assistantContent = '';
+
+  for await (const chunk of response.body) {
+    if (isClientClosed()) break;
+
+    buffer += decoder.decode(chunk, { stream: true });
+    const events = buffer.split('\n\n');
+    buffer = events.pop() || '';
+
+    for (const event of events) {
+      const text = extractGeminiTextDelta(event);
+      if (!text) continue;
+      assistantContent += text;
+      sendSseEvent(res, 'token', { text });
+    }
+  }
+
+  if (buffer.trim()) {
+    const text = extractGeminiTextDelta(buffer);
+    if (text) {
+      assistantContent += text;
+      sendSseEvent(res, 'token', { text });
+    }
+  }
+
+  return assistantContent;
+}
+
+function extractGeminiTextDelta(sseEvent) {
+  const dataLines = sseEvent
+    .split('\n')
+    .filter(line => line.startsWith('data:'))
+    .map(line => line.slice('data:'.length).trim());
+
+  if (!dataLines.length) return '';
+
+  const data = dataLines.join('\n');
+  if (!data || data === '[DONE]') return '';
+
+  let parsed;
+  try {
+    parsed = JSON.parse(data);
+  } catch (_err) {
+    return '';
+  }
+  if (parsed?.event_type === 'step.delta' && parsed?.delta?.type === 'text') {
+    return parsed.delta.text || '';
+  }
+  if (parsed?.delta?.type === 'text') return parsed.delta.text || '';
+  if (typeof parsed?.delta?.text === 'string') return parsed.delta.text;
+  if (typeof parsed?.text === 'string') return parsed.text;
+
+  const parts = parsed?.candidates?.[0]?.content?.parts;
+  if (Array.isArray(parts)) {
+    return parts.map(part => part.text || '').join('');
+  }
+
+  return '';
+}
+
+function ensureGeminiApiKey(action) {
+  if (!GEMINI_API_KEY) {
+    throw new Error(`GEMINI_API_KEY is required for Gemini ${action}.`);
+  }
+}
+
 async function streamOllamaResponse({ prompt, res, signal, isClientClosed }) {
   const response = await fetch(`${OLLAMA_URL}/api/generate`, {
     method: 'POST',
@@ -843,7 +1041,8 @@ async function fetchJsonWithTimeout(url, options, timeoutMs) {
     });
 
     if (!response.ok) {
-      throw new Error(`HTTP ${response.status}`);
+      const errorBody = await response.text().catch(() => '');
+      throw new Error(`HTTP ${response.status}: ${errorBody}`);
     }
 
     return response.json();

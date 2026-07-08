@@ -1,6 +1,6 @@
 # Roognis AI Service MVP Context
 
-Last updated: 2026-07-06
+Last updated: 2026-07-08
 
 This file is the working context for building the Roognis AI Service in small, safe parts. Use it before coding so we do not forget the current scope, accidentally overbuild production features, or mix old design documents with the latest MVP plan.
 
@@ -59,12 +59,17 @@ Completed:
   - ComfyUI failures mark jobs failed with an explicit reason.
   - Added timeout cleanup for stuck processing jobs.
   - Image generation fires analytics events without blocking the response.
+- Gemini provider implementation for MVP demo simplicity.
+  - Added `LLM_PROVIDER=gemini` chat path while preserving the RAG prompt flow.
+  - Added `IMAGE_PROVIDER=gemini` image path while preserving image job/status/image URL APIs.
+  - Kept Ollama and ComfyUI as optional local fallback providers.
+  - Updated Docker Compose so the default stack does not wait for Ollama or ComfyUI.
 
 Next:
 
-- Part 2 full integration verification with Postgres, Auth cookie, RAG stub, Analytics stub, and Ollama.
+- Part 2 full integration verification with Postgres, Auth cookie, RAG stub, Analytics stub, and Gemini.
 - Part 3 Docker verification with Auth cookie and AI DB.
-- Part 4 Docker verification with Auth cookie, AI DB, file storage, and ComfyUI.
+- Part 4 Docker verification with Auth cookie, AI DB, file storage, and Gemini image generation.
 - Then frontend integration and quiz-related backend work.
 
 ## Source Of Truth
@@ -95,7 +100,7 @@ git@github.com:chiru0631/roognis
 Current branch:
 
 ```text
-feature/ai-image-mvp
+feature/gemini-providers
 ```
 
 ## Current Repo State
@@ -105,8 +110,9 @@ Implemented:
 - `services/auth` is implemented.
 - Auth has login, register, logout, `/me`, parent-child linking, seed users, JWT cookie auth, and Prisma schema.
 - `services/ai` has service foundation, chat session/history/SSE routes, curated video recommendation routes, feedback route, and image job routes.
+- `services/ai` defaults to Gemini for chat and image generation, with Ollama/ComfyUI fallback support.
 - AI has Prisma schema for chat sessions, messages, image jobs, and feedback.
-- `docker-compose.yml` has service wiring for frontend, auth, ai, rag, analytics, postgres, chromadb, ollama, comfyui, and traefik.
+- `docker-compose.yml` has service wiring for frontend, auth, ai, rag, analytics, postgres, chromadb, and traefik, with Ollama/ComfyUI available behind the optional `local-ai` profile.
 - `services/rag` has a stub `/api/rag/retrieve` that returns empty chunks.
 - `services/analytics` has a stub `/api/analytics/event` that accepts events.
 
@@ -133,7 +139,7 @@ Build now:
 - JWT-protected student APIs.
 - Chat session creation.
 - Chat history.
-- SSE chat with Ollama.
+- SSE chat with Gemini after RAG prompt construction.
 - RAG call with safe fallback when RAG is empty or unavailable.
 - Analytics fire-and-forget calls.
 - Video topics and video serving route.
@@ -279,10 +285,10 @@ GET {RAG_SERVICE_URL}/api/rag/retrieve?q={message}&schoolId={schoolId}&subject={
 ```
 
 - If RAG returns empty chunks, use a safe fallback context.
-- Call Ollama:
+- Call Gemini by default:
 
 ```text
-POST {OLLAMA_URL}/api/generate
+POST https://generativelanguage.googleapis.com/v1beta/interactions?alt=sse
 ```
 
 - Stream tokens to browser through SSE.
@@ -339,7 +345,8 @@ MVP behavior:
 - Create image job with `queued` status.
 - Return `jobId` immediately.
 - Process in background in the Node process for now.
-- If ComfyUI is not ready, mark job as `failed` with a clear reason or use a later demo-safe fallback.
+- Use Gemini image generation by default.
+- If `IMAGE_PROVIDER=comfyui`, submit the local ComfyUI workflow and mark failures explicitly.
 - Polling endpoint returns status and image URL when done.
 - Add a timeout cleanup for stuck jobs if simple enough.
 
@@ -367,14 +374,14 @@ Minimum local checks:
 Docker checks:
 
 ```sh
-docker compose up --build ai
-docker compose logs -f ai
+docker-compose up --build ai
+docker-compose logs -f ai
 ```
 
 Full stack check later:
 
 ```sh
-docker compose up --build
+docker-compose up --build
 ```
 
 ## Important Implementation Notes
@@ -437,11 +444,12 @@ Failure to send analytics must never fail the user request.
 ## Risks To Remember
 
 - RAG is a stub, so real curriculum-grounded answers are not possible yet.
-- Ollama model startup can be slow.
+- Gemini API calls require `GEMINI_API_KEY` and the configured models to be enabled for the account.
+- Ollama model startup can be slow when using local fallback.
 - SSE must handle client disconnects.
 - The current Auth JWT does not include `grade_level`.
 - Seed data videos are missing.
-- ComfyUI model download is large and may not be available on every machine.
+- ComfyUI model download is large and may not be available on every machine when using local fallback.
 - Local Docker volume storage is fine for MVP, not final production.
 
 ## Next Coding Step
@@ -452,11 +460,12 @@ Do not implement quiz in the same PR as image MVP.
 
 Next coding checkpoint:
 
-1. Start Postgres, Auth, Traefik, Analytics, AI, and ComfyUI.
-2. Confirm AI DB push has created `image_jobs`.
-3. Login as `arjun@demo.com`.
-4. Call `POST /api/ai/image` with an educational diagram prompt.
-5. Poll `GET /api/ai/image/:jobId/status`.
-6. Confirm a missing or unready ComfyUI marks the job `failed` with a clear reason.
-7. When ComfyUI is ready, confirm status becomes `done` and `imageUrl` serves the generated PNG.
-8. Confirm missing auth returns `401` for image routes.
+1. Add `GEMINI_API_KEY` to `.env`.
+2. Start Postgres, Auth, Traefik, Analytics, RAG stub, and AI.
+3. Confirm AI DB push has created `image_jobs`.
+4. Login as `arjun@demo.com`.
+5. Call chat and confirm SSE tokens come from Gemini after RAG retrieval.
+6. Call `POST /api/ai/image` with an educational diagram prompt.
+7. Poll `GET /api/ai/image/:jobId/status`.
+8. Confirm status becomes `done` and `imageUrl` serves the generated PNG.
+9. Confirm missing auth returns `401` for chat/image routes.
