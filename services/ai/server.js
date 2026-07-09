@@ -15,6 +15,7 @@ const OLLAMA_URL = process.env.OLLAMA_URL || 'http://ollama:11434';
 const OLLAMA_MODEL = process.env.OLLAMA_MODEL || 'qwen2.5';
 const RAG_SERVICE_URL = process.env.RAG_SERVICE_URL || 'http://rag:3003';
 const ANALYTICS_URL = process.env.ANALYTICS_URL || 'http://analytics:3004';
+const INTERNAL_SERVICE_TOKEN = process.env.INTERNAL_SERVICE_TOKEN || '';
 const COMFYUI_URL = process.env.COMFYUI_URL || 'http://comfyui:8188';
 const FILE_STORAGE_PATH = process.env.FILE_STORAGE_PATH || path.join(__dirname, 'storage');
 const IMAGE_OUTPUT_DIR = path.join(FILE_STORAGE_PATH, 'images');
@@ -878,7 +879,10 @@ function fireAnalyticsEvent(event) {
     `${ANALYTICS_URL}/api/analytics/event`,
     {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: {
+        'Content-Type': 'application/json',
+        'X-Internal-Service-Token': INTERNAL_SERVICE_TOKEN,
+      },
       body: JSON.stringify(event),
     },
     3000

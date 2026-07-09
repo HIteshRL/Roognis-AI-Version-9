@@ -1,24 +1,57 @@
 const express = require('express');
-const { PrismaClient } = require('@prisma/client');
-
+const prisma = require('../lib/prisma');
 const requireAuth = require('../middleware/auth');
+const requireInternalToken = require('../middleware/internal-token');
+const {
+  isValidUuid,
+  parseDateOnly,
+  validateAttendanceStatus,
+  validateScorePair,
+  normalizeSubject,
+  normalizeOptionalString,
+} = require('../lib/validation');
+const {
+  assertStudentInSchool,
+  assertTeacherCanAccessStudent,
+  assertParentCanAccessStudent,
+  getTeacherAssignedStudentIds,
+} = require('../lib/student-access');
+const {
+  RECENT_EVENT_LIMIT,
+  daysAgo,
+  sanitizeEvent,
+  buildAttendanceSummary,
+  buildScoreSummary,
+  buildUsageSummary,
+  buildSubjectTrends,
+} = require('../lib/dashboard');
+const {
+  buildInterventionsForStudents,
+  groupEventsByStudent,
+  evaluateInterventionFlags,
+} = require('../lib/interventions');
 
 const router = express.Router();
-const prisma = new PrismaClient();
 
 const teacherOnly = [requireAuth, requireAuth.requireRole('teacher')];
 const parentOnly  = [requireAuth, requireAuth.requireRole('parent')];
 
-// POST /api/analytics/event — fire-and-forget ingestion from internal services (no JWT)
-router.post('/event', async (req, res) => {
+// POST /api/analytics/event — internal fire-and-forget ingestion
+router.post('/event', requireInternalToken, async (req, res) => {
   try {
     const { type, studentId, schoolId, subject, sessionId, metadata } = req.body || {};
 
     if (!type || typeof type !== 'string' || !type.trim())
       return res.status(400).json({ error: 'type is required.' });
 
-    if (!schoolId)
-      return res.status(400).json({ error: 'schoolId is required.' });
+    if (!isValidUuid(schoolId))
+      return res.status(400).json({ error: 'schoolId must be a valid UUID.' });
+
+    if (studentId && !isValidUuid(studentId))
+      return res.status(400).json({ error: 'studentId must be a valid UUID.' });
+
+    if (sessionId && !isValidUuid(sessionId))
+      return res.status(400).json({ error: 'sessionId must be a valid UUID.' });
 
     await prisma.event.create({
       data: {
@@ -27,7 +60,7 @@ router.post('/event', async (req, res) => {
         schoolId,
         subject: typeof subject === 'string' ? subject.trim() || null : null,
         sessionId: sessionId || null,
-        metadata: metadata && typeof metadata === 'object' ? metadata : {},
+        metadata: metadata && typeof metadata === 'object' && !Array.isArray(metadata) ? metadata : {},
       },
     });
 
@@ -38,21 +71,58 @@ router.post('/event', async (req, res) => {
   }
 });
 
+// POST /api/analytics/class/assign — assign student to teacher class
+router.post('/class/assign', ...teacherOnly, async (req, res) => {
+  try {
+    const { studentId, className, subject } = req.body || {};
+    const normalizedSubject = normalizeSubject(subject);
+
+    const access = await assertStudentInSchool(prisma, studentId, req.user.schoolId);
+    if (access.error) return res.status(access.status).json({ error: access.error });
+
+    const assignment = await prisma.classAssignment.upsert({
+      where: {
+        teacherId_studentId_subject: {
+          teacherId: req.user.userId,
+          studentId,
+          subject: normalizedSubject,
+        },
+      },
+      create: {
+        schoolId: req.user.schoolId,
+        teacherId: req.user.userId,
+        studentId,
+        className: normalizeOptionalString(className, 120),
+        subject: normalizedSubject,
+      },
+      update: {
+        className: normalizeOptionalString(className, 120),
+      },
+      select: { id: true },
+    });
+
+    return res.status(201).json({ assignmentId: assignment.id });
+  } catch (err) {
+    console.error('[analytics] class assign error:', err);
+    return res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
 // POST /api/analytics/attendance — mark attendance (teacher only)
 router.post('/attendance', ...teacherOnly, async (req, res) => {
   try {
     const { studentId, date, status } = req.body || {};
 
-    if (!studentId)
-      return res.status(400).json({ error: 'studentId is required.' });
-    if (!date)
-      return res.status(400).json({ error: 'date is required.' });
-    if (!status || typeof status !== 'string' || !status.trim())
-      return res.status(400).json({ error: 'status is required.' });
+    const access = await assertTeacherCanAccessStudent(prisma, req.user, studentId);
+    if (access.error) return res.status(access.status).json({ error: access.error });
 
-    const attendanceDate = new Date(date);
-    if (Number.isNaN(attendanceDate.getTime()))
-      return res.status(400).json({ error: 'date must be a valid date.' });
+    const attendanceDate = parseDateOnly(date);
+    if (!attendanceDate)
+      return res.status(400).json({ error: 'date must be in YYYY-MM-DD format.' });
+
+    const normalizedStatus = validateAttendanceStatus(status);
+    if (!normalizedStatus)
+      return res.status(400).json({ error: 'status must be one of: present, absent, late, excused.' });
 
     const record = await prisma.attendance.upsert({
       where: {
@@ -66,10 +136,10 @@ router.post('/attendance', ...teacherOnly, async (req, res) => {
         schoolId: req.user.schoolId,
         teacherId: req.user.userId,
         date: attendanceDate,
-        status: status.trim(),
+        status: normalizedStatus,
       },
       update: {
-        status: status.trim(),
+        status: normalizedStatus,
         teacherId: req.user.userId,
       },
       select: { id: true },
@@ -87,33 +157,33 @@ router.post('/score', ...teacherOnly, async (req, res) => {
   try {
     const { studentId, subject, testName, score, maxScore, testDate } = req.body || {};
 
-    if (!studentId)
-      return res.status(400).json({ error: 'studentId is required.' });
-    if (!subject || typeof subject !== 'string' || !subject.trim())
+    const access = await assertTeacherCanAccessStudent(prisma, req.user, studentId);
+    if (access.error) return res.status(access.status).json({ error: access.error });
+
+    const normalizedSubject = normalizeOptionalString(subject, 80);
+    const normalizedTestName = normalizeOptionalString(testName, 120);
+    if (!normalizedSubject)
       return res.status(400).json({ error: 'subject is required.' });
-    if (!testName || typeof testName !== 'string' || !testName.trim())
+    if (!normalizedTestName)
       return res.status(400).json({ error: 'testName is required.' });
-    if (score === undefined || score === null || Number.isNaN(Number(score)))
-      return res.status(400).json({ error: 'score is required.' });
-    if (!testDate)
-      return res.status(400).json({ error: 'testDate is required.' });
 
-    const parsedTestDate = new Date(testDate);
-    if (Number.isNaN(parsedTestDate.getTime()))
-      return res.status(400).json({ error: 'testDate must be a valid date.' });
+    const scoreValidation = validateScorePair(score, maxScore);
+    if (scoreValidation.error)
+      return res.status(400).json({ error: scoreValidation.error });
 
-    if (maxScore !== undefined && maxScore !== null && Number.isNaN(Number(maxScore)))
-      return res.status(400).json({ error: 'maxScore must be a number.' });
+    const parsedTestDate = parseDateOnly(testDate);
+    if (!parsedTestDate)
+      return res.status(400).json({ error: 'testDate must be in YYYY-MM-DD format.' });
 
     const record = await prisma.score.create({
       data: {
         studentId,
         schoolId: req.user.schoolId,
         teacherId: req.user.userId,
-        subject: subject.trim(),
-        testName: testName.trim(),
-        score,
-        maxScore: maxScore ?? 100,
+        subject: normalizedSubject,
+        testName: normalizedTestName,
+        score: scoreValidation.score,
+        maxScore: scoreValidation.maxScore,
         testDate: parsedTestDate,
       },
       select: { id: true },
@@ -126,39 +196,110 @@ router.post('/score', ...teacherOnly, async (req, res) => {
   }
 });
 
+// GET /api/analytics/student/:studentId
+router.get('/student/:studentId', requireAuth, async (req, res) => {
+  try {
+    const { studentId } = req.params;
+
+    if (req.user.role === 'teacher') {
+      const access = await assertTeacherCanAccessStudent(prisma, req.user, studentId);
+      if (access.error) return res.status(access.status).json({ error: access.error });
+    } else if (req.user.role === 'parent') {
+      const access = await assertParentCanAccessStudent(req.user, studentId);
+      if (access.error) return res.status(access.status).json({ error: access.error });
+    } else {
+      return res.status(403).json({ error: 'Forbidden.' });
+    }
+
+    const since7d = daysAgo(7);
+
+    const [attendance, scores, events] = await Promise.all([
+      prisma.attendance.findMany({
+        where: { studentId, schoolId: req.user.schoolId },
+        orderBy: { date: 'desc' },
+        take: RECENT_EVENT_LIMIT,
+      }),
+      prisma.score.findMany({
+        where: { studentId, schoolId: req.user.schoolId },
+        orderBy: { testDate: 'desc' },
+        take: RECENT_EVENT_LIMIT,
+      }),
+      prisma.event.findMany({
+        where: { studentId, schoolId: req.user.schoolId, createdAt: { gte: since7d } },
+        orderBy: { createdAt: 'desc' },
+        take: RECENT_EVENT_LIMIT,
+      }),
+    ]);
+
+    const interventionFlags = evaluateInterventionFlags(events);
+
+    return res.status(200).json({
+      studentId,
+      attendanceSummary: buildAttendanceSummary(attendance),
+      scoreSummary: buildScoreSummary(scores),
+      usageSummary: buildUsageSummary(events),
+      interventionFlags,
+      recentEvents: events.map(sanitizeEvent),
+    });
+  } catch (err) {
+    console.error('[analytics] student profile error:', err);
+    return res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
 // GET /api/analytics/teacher/dashboard
 router.get('/teacher/dashboard', ...teacherOnly, async (req, res) => {
   try {
     const schoolId = req.user.schoolId;
     const since7d = daysAgo(7);
+    const assignedStudentIds = await getTeacherAssignedStudentIds(prisma, req.user);
+
+    if (assignedStudentIds.length === 0) {
+      return res.status(200).json({
+        schoolId,
+        studentCount: 0,
+        usageStats: { totalEvents7d: 0, activeStudents7d: 0, byType: {} },
+        attendanceSummary: buildAttendanceSummary([]),
+        scoreSummary: buildScoreSummary([]),
+        recentEvents: [],
+      });
+    }
 
     const [attendance, scores, events] = await Promise.all([
       prisma.attendance.findMany({
-        where: { schoolId },
+        where: { schoolId, studentId: { in: assignedStudentIds } },
         orderBy: { date: 'desc' },
+        take: RECENT_EVENT_LIMIT,
       }),
       prisma.score.findMany({
-        where: { schoolId },
+        where: { schoolId, studentId: { in: assignedStudentIds } },
         orderBy: { testDate: 'desc' },
+        take: RECENT_EVENT_LIMIT,
       }),
       prisma.event.findMany({
-        where: { schoolId, createdAt: { gte: since7d } },
+        where: {
+          schoolId,
+          studentId: { in: assignedStudentIds },
+          createdAt: { gte: since7d },
+        },
         orderBy: { createdAt: 'desc' },
+        take: RECENT_EVENT_LIMIT,
       }),
     ]);
 
-    const studentIds = uniqueIds([
-      ...attendance.map(r => r.studentId),
-      ...scores.map(r => r.studentId),
-      ...events.map(r => r.studentId).filter(Boolean),
-    ]);
+    const usageStats = {
+      totalEvents7d: events.length,
+      activeStudents7d: new Set(events.map(e => e.studentId).filter(Boolean)).size,
+      byType: buildUsageSummary(events).byType,
+    };
 
     return res.status(200).json({
       schoolId,
-      studentCount: studentIds.length,
-      attendance,
-      scores,
-      recentEvents: events,
+      studentCount: assignedStudentIds.length,
+      usageStats,
+      attendanceSummary: buildAttendanceSummary(attendance),
+      scoreSummary: buildScoreSummary(scores),
+      recentEvents: events.map(sanitizeEvent),
     });
   } catch (err) {
     console.error('[analytics] teacher dashboard error:', err);
@@ -171,12 +312,13 @@ router.get('/teacher/interventions', ...teacherOnly, async (req, res) => {
   try {
     const schoolId = req.user.schoolId;
     const since7d = daysAgo(7);
+    const assignedStudentIds = await getTeacherAssignedStudentIds(prisma, req.user);
 
-    const events = await prisma.event.findMany({
+    const events = assignedStudentIds.length === 0 ? [] : await prisma.event.findMany({
       where: {
         schoolId,
+        studentId: { in: assignedStudentIds },
         createdAt: { gte: since7d },
-        studentId: { not: null },
       },
       select: {
         studentId: true,
@@ -186,15 +328,8 @@ router.get('/teacher/interventions', ...teacherOnly, async (req, res) => {
       },
     });
 
-    const byStudent = groupByStudent(events);
-    const interventions = [];
-
-    for (const [studentId, studentEvents] of Object.entries(byStudent)) {
-      const flags = evaluateIntervention(studentEvents);
-      if (flags.length > 0) {
-        interventions.push({ studentId, flags });
-      }
-    }
+    const eventsByStudent = groupEventsByStudent(events);
+    const interventions = buildInterventionsForStudents(assignedStudentIds, eventsByStudent);
 
     return res.status(200).json({ schoolId, periodDays: 7, interventions });
   } catch (err) {
@@ -211,27 +346,36 @@ router.get('/parent/dashboard', ...parentOnly, async (req, res) => {
     if (!studentId)
       return res.status(400).json({ error: 'studentId is required.' });
 
-    if (!req.user.studentIds?.includes(studentId))
-      return res.status(403).json({ error: 'Forbidden.' });
+    const access = await assertParentCanAccessStudent(req.user, studentId);
+    if (access.error) return res.status(access.status).json({ error: access.error });
 
     const since7d = daysAgo(7);
 
     const [attendance, scores, events] = await Promise.all([
       prisma.attendance.findMany({
-        where: { studentId },
+        where: { studentId, schoolId: req.user.schoolId },
         orderBy: { date: 'desc' },
+        take: RECENT_EVENT_LIMIT,
       }),
       prisma.score.findMany({
-        where: { studentId },
+        where: { studentId, schoolId: req.user.schoolId },
         orderBy: { testDate: 'desc' },
+        take: RECENT_EVENT_LIMIT,
       }),
       prisma.event.findMany({
-        where: { studentId, createdAt: { gte: since7d } },
+        where: { studentId, schoolId: req.user.schoolId, createdAt: { gte: since7d } },
         orderBy: { createdAt: 'desc' },
+        take: RECENT_EVENT_LIMIT,
       }),
     ]);
 
-    return res.status(200).json({ studentId, attendance, scores, recentEvents: events });
+    return res.status(200).json({
+      studentId,
+      usageSummary: buildUsageSummary(events),
+      attendanceSummary: buildAttendanceSummary(attendance),
+      scoreSummary: buildScoreSummary(scores),
+      recentEvents: events.map(sanitizeEvent),
+    });
   } catch (err) {
     console.error('[analytics] parent dashboard error:', err);
     return res.status(500).json({ error: 'Internal server error' });
@@ -243,9 +387,14 @@ router.get('/queries/trends', ...teacherOnly, async (req, res) => {
   try {
     const schoolId = req.user.schoolId;
     const since30d = daysAgo(30);
+    const assignedStudentIds = await getTeacherAssignedStudentIds(prisma, req.user);
 
-    const events = await prisma.event.findMany({
-      where: { schoolId, createdAt: { gte: since30d } },
+    const events = assignedStudentIds.length === 0 ? [] : await prisma.event.findMany({
+      where: {
+        schoolId,
+        studentId: { in: assignedStudentIds },
+        createdAt: { gte: since30d },
+      },
       select: {
         type: true,
         subject: true,
@@ -255,101 +404,16 @@ router.get('/queries/trends', ...teacherOnly, async (req, res) => {
       },
     });
 
-    const usageStats = {
-      totalEvents: events.length,
-      byType: countBy(events, e => e.type),
-      activeStudents: uniqueIds(events.map(e => e.studentId).filter(Boolean)).length,
-    };
-
-    const subjectTrends = buildSubjectTrends(events);
-
     return res.status(200).json({
       schoolId,
       periodDays: 30,
-      usageStats,
-      subjectTrends,
+      usageStats: buildUsageSummary(events),
+      subjectTrends: buildSubjectTrends(events),
     });
   } catch (err) {
     console.error('[analytics] queries/trends error:', err);
     return res.status(500).json({ error: 'Internal server error' });
   }
 });
-
-function daysAgo(n) {
-  const d = new Date();
-  d.setDate(d.getDate() - n);
-  return d;
-}
-
-function uniqueIds(ids) {
-  return [...new Set(ids)];
-}
-
-function groupByStudent(events) {
-  return events.reduce((acc, event) => {
-    if (!event.studentId) return acc;
-    if (!acc[event.studentId]) acc[event.studentId] = [];
-    acc[event.studentId].push(event);
-    return acc;
-  }, {});
-}
-
-function evaluateIntervention(studentEvents) {
-  const flags = [];
-
-  const feedbackEvents = studentEvents.filter(e => e.type === 'feedback_submitted');
-  const ratings = feedbackEvents
-    .map(e => Number(e.metadata?.rating))
-    .filter(r => Number.isFinite(r));
-
-  if (ratings.length > 0) {
-    const avg = ratings.reduce((sum, r) => sum + r, 0) / ratings.length;
-    if (avg < 3.0) flags.push('low_feedback_rating');
-  }
-
-  const sessionIds = uniqueIds(
-    studentEvents
-      .filter(e => e.type === 'chat_message' && e.sessionId)
-      .map(e => e.sessionId)
-  );
-
-  if (sessionIds.length < 3) flags.push('low_session_count');
-
-  return flags;
-}
-
-function countBy(items, keyFn) {
-  return items.reduce((acc, item) => {
-    const key = keyFn(item);
-    acc[key] = (acc[key] || 0) + 1;
-    return acc;
-  }, {});
-}
-
-function buildSubjectTrends(events) {
-  const bySubject = {};
-
-  for (const event of events) {
-    if (!event.subject) continue;
-    if (!bySubject[event.subject]) {
-      bySubject[event.subject] = { subject: event.subject, eventCount: 0, sessionIds: new Set(), ratings: [] };
-    }
-    const entry = bySubject[event.subject];
-    entry.eventCount += 1;
-    if (event.sessionId) entry.sessionIds.add(event.sessionId);
-    if (event.type === 'feedback_submitted' && Number.isFinite(Number(event.metadata?.rating))) {
-      entry.ratings.push(Number(event.metadata.rating));
-    }
-  }
-
-  return Object.values(bySubject).map(entry => ({
-    subject: entry.subject,
-    eventCount: entry.eventCount,
-    sessionCount: entry.sessionIds.size,
-    avgRating: entry.ratings.length > 0
-      ? entry.ratings.reduce((sum, r) => sum + r, 0) / entry.ratings.length
-      : null,
-  }));
-}
 
 module.exports = router;
