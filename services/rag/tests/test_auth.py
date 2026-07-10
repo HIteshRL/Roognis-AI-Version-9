@@ -21,5 +21,5 @@ def test_teacher_jwt_reaches_protected_documents_handler(client, token_factory):
 
     response = client.get("/api/rag/documents")
 
-    assert response.status_code == 501
-    assert response.json()["detail"] == "Document listing is not implemented yet."
+    assert response.status_code == 200
+    assert response.json() == {"documents": []}
