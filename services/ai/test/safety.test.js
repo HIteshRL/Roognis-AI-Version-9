@@ -28,6 +28,16 @@ test('blocks dangerous chat instructions before provider calls', () => {
   assert.equal(result.category, 'dangerous_instructions');
 });
 
+test('blocks profanity and requests to learn bad words before provider calls', () => {
+  const profanity = validateStudentMessageSafety('wt is fuck');
+  const request = validateStudentMessageSafety('can u teach me bad words');
+
+  assert.equal(profanity.allowed, false);
+  assert.equal(profanity.category, 'age_inappropriate_language');
+  assert.equal(request.allowed, false);
+  assert.equal(request.category, 'age_inappropriate_language');
+});
+
 test('blocks unsafe generated text before SSE streaming', () => {
   const result = validateGeneratedTextSafety('Here is how to steal password details.');
 

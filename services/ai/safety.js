@@ -57,6 +57,14 @@ function getChatSafetyRules() {
       ],
     },
     {
+      category: 'age_inappropriate_language',
+      reason: 'Profanity or requests to learn bad words are not appropriate for school tutoring.',
+      patterns: [
+        /\b(teach|learn|show|tell)\b.{0,30}\b(bad words?|curse words?|swear words?|abusive words?|dirty words?)\b/i,
+        /\b(fuck|shit|bitch|asshole|bastard|motherfucker|cunt|dick|pussy)\b/i,
+      ],
+    },
+    {
       category: 'dangerous_instructions',
       reason: 'Dangerous instructions are not allowed.',
       patterns: [

@@ -5,7 +5,6 @@ const fs = require('fs/promises');
 const path = require('path');
 
 const requireAuth = require('./middleware/auth');
-const videoLibrary = require('./data/video-library.json');
 const {
   SAFE_REFUSAL_MESSAGE,
   validateStudentMessageSafety,
@@ -23,14 +22,21 @@ const OLLAMA_URL = process.env.OLLAMA_URL || 'http://ollama:11434';
 const OLLAMA_MODEL = process.env.OLLAMA_MODEL || 'qwen2.5';
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY || '';
 const GEMINI_API_BASE_URL = process.env.GEMINI_API_BASE_URL || 'https://generativelanguage.googleapis.com/v1beta';
-const GEMINI_TEXT_MODEL = process.env.GEMINI_TEXT_MODEL || 'gemini-3.5-flash';
+const GEMINI_TEXT_MODEL = process.env.GEMINI_TEXT_MODEL || 'gemini-3.1-flash-lite';
 const GEMINI_IMAGE_MODEL = process.env.GEMINI_IMAGE_MODEL || 'gemini-3.1-flash-image';
+const GEMINI_TEXT_TIMEOUT_MS = Number(process.env.GEMINI_TEXT_TIMEOUT_MS || 30000);
 const RAG_SERVICE_URL = process.env.RAG_SERVICE_URL || 'http://rag:3003';
 const ANALYTICS_URL = process.env.ANALYTICS_URL || 'http://analytics:3004';
 const INTERNAL_SERVICE_TOKEN = process.env.INTERNAL_SERVICE_TOKEN || '';
 const COMFYUI_URL = process.env.COMFYUI_URL || 'http://comfyui:8188';
 const FILE_STORAGE_PATH = process.env.FILE_STORAGE_PATH || path.join(__dirname, 'storage');
 const IMAGE_OUTPUT_DIR = path.join(FILE_STORAGE_PATH, 'images');
+const GEMINI_IMAGE_MIME_TYPE = process.env.GEMINI_IMAGE_MIME_TYPE || 'image/jpeg';
+const VIDEO_PROVIDER = normalizeProvider(process.env.VIDEO_PROVIDER, ['youtube'], 'youtube');
+const YOUTUBE_API_KEY = process.env.YOUTUBE_API_KEY || '';
+const YOUTUBE_API_BASE_URL = process.env.YOUTUBE_API_BASE_URL || 'https://www.googleapis.com/youtube/v3';
+const VIDEO_SEARCH_MAX_RESULTS = Math.min(Math.max(Number(process.env.VIDEO_SEARCH_MAX_RESULTS || 5), 1), 10);
+const VIDEO_TRUSTED_CHANNELS = parseCsv(process.env.VIDEO_TRUSTED_CHANNELS || '');
 const IMAGE_PROMPT_MAX_LENGTH = 300;
 const IMAGE_JOB_TIMEOUT_MS = Number(process.env.IMAGE_JOB_TIMEOUT_MS || 5 * 60 * 1000);
 const IMAGE_POLL_INTERVAL_MS = Number(process.env.IMAGE_POLL_INTERVAL_MS || 3000);
@@ -136,11 +142,55 @@ app.post('/api/ai/chat', ...studentOnly, asyncHandler(async (req, res) => {
   });
 
   try {
+    const videoRecommendation = await findVideoRecommendationForMessage(message, session.subject);
+    if (videoRecommendation) {
+      const assistantContent = buildVideoRecommendationContent(videoRecommendation);
+      if (videoRecommendation.videos.length) {
+        sendSseEvent(res, 'video_recommendations', buildVideoRecommendationPayload(videoRecommendation));
+      }
+      await streamTextAsSse(assistantContent, res, () => clientClosed);
+
+      if (clientClosed) return;
+
+      const assistantMessage = await prisma.message.create({
+        data: {
+          sessionId: session.id,
+          role: 'assistant',
+          content: assistantContent,
+        },
+        select: { id: true },
+      });
+
+      fireAnalyticsEvent({
+        type: 'video_recommended',
+        studentId: req.user.userId,
+        schoolId: req.user.schoolId,
+        subject: session.subject,
+        sessionId: session.id,
+        metadata: {
+          userMessageId: userMessage.id,
+          assistantMessageId: assistantMessage.id,
+          topic: videoRecommendation.topic.topic,
+          videoIds: videoRecommendation.videos.map(video => video.id),
+          provider: videoRecommendation.provider,
+          resultCount: videoRecommendation.videos.length,
+          unavailableReason: videoRecommendation.unavailableReason,
+        },
+      });
+
+      sendSseEvent(res, 'done', '[DONE]');
+      return res.end();
+    }
+
     const chunks = await retrieveRagChunks({
       q: message,
       schoolId: session.schoolId,
       subject: session.subject,
       top: 5,
+    });
+    sendSseEvent(res, 'answer_context', {
+      source: chunks.length ? 'rag' : 'general',
+      ragChunkCount: chunks.length,
     });
 
     const prompt = buildTutorPrompt({
@@ -199,43 +249,19 @@ app.post('/api/ai/chat', ...studentOnly, asyncHandler(async (req, res) => {
     if (clientClosed) return;
 
     console.error('[ai] chat stream error:', err);
-    sendSseEvent(res, 'error', { error: 'AI response failed. Please try again.' });
+    sendSseEvent(res, 'error', { error: buildChatClientError(err) });
     sendSseEvent(res, 'done', '[DONE]');
     res.end();
   }
 }));
 
 app.get('/api/ai/video/topics', ...studentOnly, (_req, res) => {
-  const topics = videoLibrary.map(topic => {
-    const approvedVideos = getApprovedVideos(topic);
-    return {
-      topic: topic.topic,
-      label: topic.label,
-      subject: topic.subject,
-      gradeLevel: topic.gradeLevel,
-      description: topic.description,
-      videoCount: approvedVideos.length,
-      averageQualityScore: calculateAverageQualityScore(approvedVideos),
-    };
-  });
-
-  res.status(200).json(topics);
+  res.status(200).json([]);
 });
 
 app.get('/api/ai/video/:topic', ...studentOnly, (req, res) => {
-  const topic = findVideoTopic(req.params.topic);
-  if (!topic) {
-    return res.status(404).json({ error: 'Video topic not found.' });
-  }
-
-  const videos = getApprovedVideos(topic);
-  res.status(200).json({
-    topic: topic.topic,
-    label: topic.label,
-    subject: topic.subject,
-    gradeLevel: topic.gradeLevel,
-    description: topic.description,
-    videos,
+  res.status(410).json({
+    error: 'Static video topics are disabled. Ask the tutor chat for a real-time video recommendation.',
   });
 });
 
@@ -381,7 +407,7 @@ app.get('/api/ai/images/:filename', ...studentOnly, asyncHandler(async (req, res
     return res.status(404).json({ error: 'Image not found.' });
   }
 
-  const jobId = filename.slice(0, -'.png'.length);
+  const jobId = extractImageJobId(filename);
   const job = await prisma.imageJob.findFirst({
     where: {
       id: jobId,
@@ -398,7 +424,7 @@ app.get('/api/ai/images/:filename', ...studentOnly, asyncHandler(async (req, res
   const imagePath = path.join(IMAGE_OUTPUT_DIR, filename);
   try {
     const image = await fs.readFile(imagePath);
-    res.type('png').status(200).send(image);
+    res.type(getImageResponseType(filename)).status(200).send(image);
   } catch (err) {
     if (err.code === 'ENOENT') return res.status(404).json({ error: 'Image not found.' });
     throw err;
@@ -480,22 +506,347 @@ function normalizeImagePrompt(prompt) {
   return trimmed;
 }
 
-function findVideoTopic(topic) {
-  if (!topic) return null;
-  const normalized = topic.trim().toLowerCase();
-  return videoLibrary.find(item => item.topic.toLowerCase() === normalized);
+async function findVideoRecommendationForMessage(message, subject) {
+  if (!isVideoRequest(message)) return null;
+
+  const query = extractVideoSearchQuery(message, subject);
+  if (!query) {
+    return buildUnavailableVideoRecommendation(
+      'lesson video',
+      'Ask for a clear school topic, for example "photosynthesis" or "physical and chemical changes".',
+      subject
+    );
+  }
+
+  if (VIDEO_PROVIDER === 'youtube') {
+    return searchYoutubeVideoRecommendation(query, subject);
+  }
+
+  return buildUnavailableVideoRecommendation(query, 'Real-time video search provider is not configured.', subject);
 }
 
-function getApprovedVideos(topic) {
-  return topic.videos
-    .filter(video => video.reviewStatus === 'approved_source')
-    .sort((a, b) => b.qualityScore - a.qualityScore);
+function isVideoRequest(message) {
+  return /\b(video|videos|watch|youtube|playlist|lecture)\b/i.test(message);
 }
 
-function calculateAverageQualityScore(videos) {
-  if (!videos.length) return null;
-  const total = videos.reduce((sum, video) => sum + video.qualityScore, 0);
-  return Math.round(total / videos.length);
+const VIDEO_STOP_WORDS = new Set([
+  'can',
+  'u',
+  'you',
+  'get',
+  'give',
+  'find',
+  'show',
+  'recommend',
+  'me',
+  'video',
+  'videos',
+  'watch',
+  'learn',
+  'study',
+  'for',
+  'of',
+  'the',
+  'a',
+  'an',
+  'and',
+  'or',
+  'in',
+  'with',
+  'from',
+  'to',
+  'on',
+  'about',
+  'please',
+  'best',
+]);
+
+function extractVideoSearchQuery(message, subject) {
+  const normalized = normalizeSearchText(message);
+  const tokens = tokenizeSearchText(normalized)
+    .filter(token => !VIDEO_STOP_WORDS.has(token))
+    .filter(token => token.length > 1);
+
+  if (!tokens.length) return '';
+
+  const topic = tokens.join(' ');
+  const subjectHint = normalizeSearchText(subject);
+  return [topic, subjectHint, 'school lesson']
+    .filter(Boolean)
+    .join(' ');
+}
+
+async function searchYoutubeVideoRecommendation(query, subject) {
+  if (!YOUTUBE_API_KEY) {
+    return buildUnavailableVideoRecommendation(
+      query,
+      'YouTube real-time search is not configured yet. Add YOUTUBE_API_KEY to enable live video lookup.',
+      subject
+    );
+  }
+
+  try {
+    const params = new URLSearchParams({
+      part: 'snippet',
+      q: query,
+      type: 'video',
+      maxResults: String(VIDEO_SEARCH_MAX_RESULTS),
+      safeSearch: 'strict',
+      videoCategoryId: '27',
+      relevanceLanguage: 'en',
+      order: 'relevance',
+      key: YOUTUBE_API_KEY,
+    });
+
+    const searchResult = await fetchJsonWithTimeout(
+      `${YOUTUBE_API_BASE_URL}/search?${params.toString()}`,
+      { method: 'GET' },
+      10000
+    );
+
+    const rawItems = Array.isArray(searchResult?.items) ? searchResult.items : [];
+    const candidateItems = rawItems.filter(isUsableYoutubeSearchItem);
+    const detailById = await loadYoutubeVideoDetails(candidateItems.map(item => item.id.videoId));
+    const videos = candidateItems
+      .map(item => toRealtimeYoutubeVideo(item, detailById.get(item.id.videoId)))
+      .filter(Boolean)
+      .filter(video => isTrustedVideoResult(video))
+      .slice(0, 2);
+
+    if (!videos.length) {
+      return buildUnavailableVideoRecommendation(
+        query,
+        VIDEO_TRUSTED_CHANNELS.length
+          ? 'No safe result from trusted education channels was found for this topic.'
+          : 'No safe education video result was found for this topic.',
+        subject
+      );
+    }
+
+    return {
+      provider: 'youtube',
+      query,
+      topic: {
+        topic: slugifyTopic(query),
+        label: toTitleCase(removeSearchSuffix(query, subject)),
+        subject: subject || 'General',
+        gradeLevel: null,
+        description: 'Real-time safe-search video recommendation from YouTube.',
+      },
+      videos,
+    };
+  } catch (err) {
+    console.warn('[ai] real-time video search failed:', err.message);
+    return buildUnavailableVideoRecommendation(query, 'Real-time video search failed. Please try again.', subject);
+  }
+}
+
+async function loadYoutubeVideoDetails(videoIds) {
+  const uniqueIds = [...new Set(videoIds)].filter(Boolean);
+  if (!uniqueIds.length) return new Map();
+
+  const params = new URLSearchParams({
+    part: 'contentDetails,statistics,status',
+    id: uniqueIds.join(','),
+    key: YOUTUBE_API_KEY,
+  });
+
+  const result = await fetchJsonWithTimeout(
+    `${YOUTUBE_API_BASE_URL}/videos?${params.toString()}`,
+    { method: 'GET' },
+    10000
+  );
+
+  const detailById = new Map();
+  for (const item of result?.items || []) {
+    if (item?.id) detailById.set(item.id, item);
+  }
+  return detailById;
+}
+
+function isUsableYoutubeSearchItem(item) {
+  const videoId = item?.id?.videoId;
+  const snippet = item?.snippet;
+  if (!videoId || !snippet?.title || !snippet?.channelTitle) return false;
+
+  const titleSafety = validateGeneratedTextSafety(snippet.title);
+  const descriptionSafety = validateGeneratedTextSafety(snippet.description || '');
+  return titleSafety.allowed && descriptionSafety.allowed;
+}
+
+function toRealtimeYoutubeVideo(item, details) {
+  const videoId = item?.id?.videoId;
+  const snippet = item?.snippet;
+  if (!videoId || !snippet) return null;
+
+  const embeddable = details?.status?.embeddable;
+  if (embeddable === false) return null;
+
+  const durationSeconds = parseYoutubeDuration(details?.contentDetails?.duration);
+  const viewCount = Number(details?.statistics?.viewCount || 0);
+  const title = decodeHtmlEntities(snippet.title);
+  const source = decodeHtmlEntities(snippet.channelTitle);
+
+  return {
+    id: `youtube-${videoId}`,
+    providerVideoId: videoId,
+    title,
+    source,
+    sourceType: 'youtube_realtime',
+    url: `https://www.youtube.com/watch?v=${encodeURIComponent(videoId)}`,
+    thumbnailUrl: snippet.thumbnails?.medium?.url || snippet.thumbnails?.default?.url || null,
+    durationSeconds,
+    viewCount,
+    language: 'English',
+    ageBand: 'school',
+    qualityScore: scoreRealtimeVideo({ source, viewCount, durationSeconds }),
+    reviewStatus: 'provider_safe_search',
+  };
+}
+
+function isTrustedVideoResult(video) {
+  if (!VIDEO_TRUSTED_CHANNELS.length) return true;
+  const source = normalizeSearchText(video.source);
+  return VIDEO_TRUSTED_CHANNELS.some(channel => source.includes(normalizeSearchText(channel)));
+}
+
+function scoreRealtimeVideo({ source, viewCount, durationSeconds }) {
+  let score = 70;
+  if (VIDEO_TRUSTED_CHANNELS.some(channel => normalizeSearchText(source).includes(normalizeSearchText(channel)))) {
+    score += 15;
+  }
+  if (viewCount > 100000) score += 8;
+  if (durationSeconds && durationSeconds >= 120 && durationSeconds <= 900) score += 7;
+  return Math.min(score, 100);
+}
+
+function buildUnavailableVideoRecommendation(query, reason, subject) {
+  return {
+    provider: VIDEO_PROVIDER,
+    query,
+    unavailableReason: reason,
+    topic: {
+      topic: slugifyTopic(query),
+      label: toTitleCase(removeSearchSuffix(query, subject)),
+      subject: subject || 'General',
+      gradeLevel: null,
+      description: 'Real-time video search did not return a safe result.',
+    },
+    videos: [],
+  };
+}
+
+function removeSearchSuffix(query, subject) {
+  const suffixes = ['school lesson'];
+  if (subject) suffixes.push(normalizeSearchText(subject));
+  let cleaned = normalizeSearchText(query);
+  for (const suffix of suffixes) {
+    cleaned = cleaned.replace(new RegExp(`\\b${escapeRegExp(suffix)}\\b`, 'g'), ' ');
+  }
+  return cleaned.replace(/\s+/g, ' ').trim() || query;
+}
+
+function buildVideoRecommendationContent(recommendation) {
+  if (!recommendation.videos.length) {
+    return `I could not find a safe real-time video for ${recommendation.topic.label || 'that topic'}.\n\n${recommendation.unavailableReason}`;
+  }
+
+  const [primary, secondary] = recommendation.videos;
+  const lines = [
+    `I found safe real-time video results for ${recommendation.topic.label}.`,
+    '',
+    `Best pick: ${primary.title} (${primary.source})`,
+    primary.url,
+  ];
+
+  if (secondary) {
+    lines.push('', `Also useful: ${secondary.title} (${secondary.source})`, secondary.url);
+  }
+
+  lines.push('', 'I added this recommendation to the Videos tab as well.');
+  return lines.join('\n');
+}
+
+function normalizeSearchText(value) {
+  return String(value || '')
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function tokenizeSearchText(value) {
+  return normalizeSearchText(value).split(' ').filter(Boolean);
+}
+
+function buildVideoRecommendationPayload(recommendation) {
+  return {
+    topic: {
+      topic: recommendation.topic.topic,
+      label: recommendation.topic.label,
+      subject: recommendation.topic.subject,
+      gradeLevel: recommendation.topic.gradeLevel,
+      description: recommendation.topic.description,
+    },
+    videos: recommendation.videos.map(toPublicVideo),
+  };
+}
+
+function toPublicVideo(video) {
+  return {
+    id: video.id,
+    title: video.title,
+    source: video.source,
+    url: video.url,
+    thumbnailUrl: video.thumbnailUrl,
+    durationSeconds: video.durationSeconds,
+    qualityScore: video.qualityScore,
+    reviewStatus: video.reviewStatus,
+  };
+}
+
+function parseCsv(value) {
+  return String(value || '')
+    .split(',')
+    .map(item => item.trim())
+    .filter(Boolean);
+}
+
+function parseYoutubeDuration(duration) {
+  if (typeof duration !== 'string') return null;
+  const match = duration.match(/^PT(?:(\d+)H)?(?:(\d+)M)?(?:(\d+)S)?$/);
+  if (!match) return null;
+  const hours = Number(match[1] || 0);
+  const minutes = Number(match[2] || 0);
+  const seconds = Number(match[3] || 0);
+  return hours * 3600 + minutes * 60 + seconds;
+}
+
+function slugifyTopic(value) {
+  return normalizeSearchText(value)
+    .replace(/\s+/g, '-')
+    .replace(/^-+|-+$/g, '') || 'video-search';
+}
+
+function toTitleCase(value) {
+  return String(value || '')
+    .split(/\s+/)
+    .filter(Boolean)
+    .map(word => `${word.charAt(0).toUpperCase()}${word.slice(1)}`)
+    .join(' ') || 'Video Search';
+}
+
+function decodeHtmlEntities(value) {
+  return String(value || '')
+    .replace(/&amp;/g, '&')
+    .replace(/&quot;/g, '"')
+    .replace(/&#39;/g, "'")
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>');
+}
+
+function escapeRegExp(value) {
+  return String(value).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
 
 function runImageJobInBackground(jobId) {
@@ -536,7 +887,7 @@ async function processImageJob(jobId) {
     await fs.mkdir(IMAGE_OUTPUT_DIR, { recursive: true });
 
     const image = await generateImage(job);
-    const filename = `${job.id}.png`;
+    const filename = `${job.id}.${getImageFileExtension()}`;
     const imageUrl = `/api/ai/images/${filename}`;
 
     await fs.writeFile(path.join(IMAGE_OUTPUT_DIR, filename), image);
@@ -605,7 +956,7 @@ async function generateGeminiImage(prompt) {
         ],
         response_format: {
           type: 'image',
-          mime_type: 'image/png',
+          mime_type: GEMINI_IMAGE_MIME_TYPE,
           aspect_ratio: '1:1',
           image_size: '1K',
         },
@@ -800,12 +1151,49 @@ function buildImageFailureReason(err) {
   if (err?.name === 'AbortError') return 'Image generation service timed out.';
   const message = typeof err?.message === 'string' ? err.message : '';
   if (!message) return 'Image generation failed.';
+  const normalized = message.toLowerCase();
+  if (normalized.includes('quota') || normalized.includes('429') || normalized.includes('too_many_requests')) {
+    return 'Gemini image quota is exhausted for this project. Try again after quota resets or switch IMAGE_PROVIDER to another configured provider.';
+  }
+  if (normalized.includes('mime_type') || normalized.includes('response_format')) {
+    return 'Image provider rejected the requested output format.';
+  }
   if (message.length > 500) return `${message.slice(0, 497)}...`;
   return message;
 }
 
+function buildChatClientError(err) {
+  const message = typeof err?.message === 'string' ? err.message : '';
+  const normalized = message.toLowerCase();
+
+  if (normalized.includes('timed out')) {
+    return 'AI provider timed out. Please try again.';
+  }
+  if (normalized.includes('quota') || normalized.includes('429')) {
+    return 'AI provider quota is exhausted for now.';
+  }
+  if (normalized.includes('503') || normalized.includes('unavailable')) {
+    return 'AI provider is temporarily busy. Please try again.';
+  }
+
+  return 'AI response failed. Please try again.';
+}
+
+function getImageFileExtension() {
+  if (IMAGE_PROVIDER === 'gemini' && GEMINI_IMAGE_MIME_TYPE === 'image/jpeg') return 'jpg';
+  return 'png';
+}
+
+function getImageResponseType(filename) {
+  return /\.(jpe?g)$/i.test(filename) ? 'jpeg' : 'png';
+}
+
+function extractImageJobId(filename) {
+  return filename.replace(/\.(png|jpe?g)$/i, '');
+}
+
 function isValidImageFilename(filename) {
-  return /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\.png$/i.test(filename);
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\.(png|jpe?g)$/i.test(filename);
 }
 
 function isValidUuid(value) {
@@ -889,17 +1277,32 @@ function buildTutorPrompt({ chunks, history, question }) {
     : 'No previous conversation.';
 
   const noContextRule = hasChunks
-    ? '- Answer ONLY based on the provided context below.'
-    : `- Since no textbook context was retrieved, do not invent facts. Say: "I don't have information on that yet."`;
+    ? [
+        '- Use the provided context first.',
+        '- If the context does not fully answer a normal school-learning question, you may add brief general curriculum knowledge.',
+        '- Do not claim that unsupported general knowledge came from the provided context.',
+      ].join('\n')
+    : [
+        '- No textbook context was retrieved yet, so answer only if this is a normal school-learning question.',
+        '- Use brief, age-appropriate general curriculum knowledge for school topics.',
+        '- If the question is not a school-learning question or you are unsure, say: "I do not have information on that yet."',
+      ].join('\n');
 
   return `You are Roognis, an AI tutor for school students.
 Rules:
 ${noContextRule}
-- If the answer is not in the context, say:
-  "I don't have information on that yet."
 - Be concise, friendly, and use simple language suitable for school students.
 - Never make up facts.
-- Format answers with bullet points when listing.
+- Use short paragraphs, numbered steps, and simple bullet lists when useful.
+- Do not show raw Markdown symbols such as **bold**, leading asterisks, or LaTeX dollar signs.
+- Teach like a patient school tutor, not like a textbook.
+- For concept questions, use this flow:
+  1. Start with the idea in one simple sentence.
+  2. Give one relatable "imagine this" example from daily life or school.
+  3. Walk through one worked example step by step.
+  4. End with one small "Try this" practice question.
+  5. Ask if the student wants a hint or another example.
+- Keep the answer easy to scan. Avoid long paragraphs.
 
 Context:
 ${ragContext}
@@ -967,7 +1370,16 @@ async function generateGeminiTextResponse({ prompt, signal }) {
   ensureGeminiApiKey('chat completion');
 
   const model = normalizeGeminiModelName(GEMINI_TEXT_MODEL);
-  const response = await fetch(`${GEMINI_API_BASE_URL}/models/${encodeURIComponent(model)}:generateContent`, {
+  const requestAbort = new AbortController();
+  const timeout = setTimeout(() => requestAbort.abort(new Error('Gemini request timed out.')), GEMINI_TEXT_TIMEOUT_MS);
+  const abortFromClient = () => requestAbort.abort(signal.reason);
+  if (signal?.aborted) {
+    abortFromClient();
+  } else {
+    signal?.addEventListener('abort', abortFromClient, { once: true });
+  }
+
+  const request = {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
@@ -985,12 +1397,23 @@ async function generateGeminiTextResponse({ prompt, signal }) {
       },
       safetySettings: getGeminiSafetySettings(),
     }),
-    signal,
-  });
+    signal: requestAbort.signal,
+  };
 
-  if (!response.ok) {
-    const errorBody = await response.text().catch(() => '');
-    throw new Error(`Gemini request failed with ${response.status}: ${errorBody}`);
+  let response;
+  try {
+    response = await fetchGeminiWithRetry(
+      `${GEMINI_API_BASE_URL}/models/${encodeURIComponent(model)}:generateContent`,
+      request
+    );
+  } catch (err) {
+    if (requestAbort.signal.aborted && !signal?.aborted) {
+      throw new Error('Gemini request timed out. Please try again.');
+    }
+    throw err;
+  } finally {
+    clearTimeout(timeout);
+    signal?.removeEventListener?.('abort', abortFromClient);
   }
 
   const parsed = await response.json();
@@ -1026,6 +1449,32 @@ async function generateGeminiTextResponse({ prompt, signal }) {
     safetyBlocked: false,
     originalContentLength: content.length,
   };
+}
+
+async function fetchGeminiWithRetry(url, request) {
+  const maxAttempts = 3;
+  let lastErrorBody = '';
+  let lastStatus = 0;
+
+  for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+    const response = await fetch(url, request);
+    if (response.ok) return response;
+
+    lastStatus = response.status;
+    lastErrorBody = await response.text().catch(() => '');
+
+    if (!isTransientGeminiStatus(response.status) || attempt === maxAttempts) {
+      break;
+    }
+
+    await sleep(650 * attempt);
+  }
+
+  throw new Error(`Gemini request failed with ${lastStatus}: ${lastErrorBody}`);
+}
+
+function isTransientGeminiStatus(status) {
+  return [429, 500, 502, 503, 504].includes(status);
 }
 
 function extractGeminiCandidateText(candidate) {
