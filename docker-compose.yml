@@ -123,6 +123,7 @@ services:
       OLLAMA_URL: "http://ollama:11434"
       RAG_SERVICE_URL: "http://rag:3003"
       ANALYTICS_URL: "http://analytics:3004"
+      INTERNAL_SERVICE_TOKEN: ${INTERNAL_SERVICE_TOKEN}
       COMFYUI_URL: "http://comfyui:8188"
       FILE_STORAGE_PATH: /app/storage
       PORT: 3002
@@ -188,6 +189,7 @@ services:
     environment:
       DATABASE_URL: "postgresql://postgres:${DB_PASSWORD}@postgres:5432/roognis?schema=analytics_db"
       JWT_SECRET: ${JWT_SECRET}
+      INTERNAL_SERVICE_TOKEN: ${INTERNAL_SERVICE_TOKEN}
       PORT: 3004
       NODE_ENV: production
     depends_on:

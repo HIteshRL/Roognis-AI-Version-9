@@ -18,6 +18,7 @@ kubectl create secret generic ai-secrets \
   --namespace roognis \
   --from-literal=DATABASE_URL="postgresql://<DB_USER>:<DB_PASS>@<DB_HOST>/roognis?schema=ai_db" \
   --from-literal=JWT_SECRET="<same as auth>" \
+  --from-literal=INTERNAL_SERVICE_TOKEN="<same as analytics>" \
   --from-literal=OLLAMA_URL="http://ollama:11434" \
   --from-literal=ANTHROPIC_API_KEY="" \
   --from-literal=AWS_S3_BUCKET="" \
@@ -28,7 +29,8 @@ kubectl create secret generic ai-secrets \
 kubectl create secret generic analytics-secrets \
   --namespace roognis \
   --from-literal=DATABASE_URL="postgresql://<DB_USER>:<DB_PASS>@<DB_HOST>/roognis?schema=analytics_db" \
-  --from-literal=JWT_SECRET="<same as auth>"
+  --from-literal=JWT_SECRET="<same as auth>" \
+  --from-literal=INTERNAL_SERVICE_TOKEN="<shared internal token>"
 
 # RAG service
 kubectl create secret generic rag-secrets \

@@ -1,7 +1,8 @@
 FROM node:20-alpine
 WORKDIR /app
 
-RUN apk add --no-cache curl
+# openssl required by Prisma query engine on Alpine (same as auth/ai services)
+RUN apk add --no-cache curl openssl
 
 COPY . .
 
