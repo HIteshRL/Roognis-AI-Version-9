@@ -16,7 +16,7 @@ The combined review is still available at:
 | AI Service | Implemented for chat, image, video metadata, feedback, safety | Needs quiz-draft generation support |
 | Quiz Service | Missing | Required |
 | Analytics / Learning Progress | Stub in current branch; PR #8 is partial | Needs quiz/progress analytics |
-| RAG Service | Stub only | Needed for grounded chat and quiz quality |
+| RAG / EKE Service | Stub only | Needed for grounded chat and quiz quality |
 | Backend Infra | Docker/K8s exists for current services | Needs Quiz service wiring and cleanup |
 
 ## Recommended Build Order
@@ -35,6 +35,7 @@ The combined review is still available at:
 - `QUIZ_SERVICE_LLD.md`
 - `ANALYTICS_SERVICE_LLD.md`
 - `RAG_SERVICE_LLD.md`
+- `RAG_EKE_INGESTION_CONTRACT.md`
 - `INFRA_BACKEND_LLD.md`
 
 ## Cross-Service Ownership Rules
@@ -43,6 +44,6 @@ The combined review is still available at:
 - AI owns model calls, child safety, tutor responses, image generation, and AI-generated quiz drafts.
 - Quiz owns quiz lifecycle, assignments, student attempts, grading, and quiz review source-of-truth.
 - Analytics owns dashboard aggregation, streaks, time spent, weak-area rollups, and parent/teacher/student summaries.
-- RAG owns lesson/document ingestion and retrieval context.
+- RAG / EKE owns lesson/document ingestion, educational entities, and retrieval context.
 - Frontend should not infer permissions from hardcoded email strings once backend wiring begins.
 
