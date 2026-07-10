@@ -18,7 +18,10 @@
 import os
 from fastapi import FastAPI
 
+from config import get_settings
+
 app = FastAPI(title="Roognis RAG Service")
+app.state.settings = get_settings()
 
 
 @app.get("/health")
