@@ -118,8 +118,12 @@ services:
       LLM_PROVIDER: ${LLM_PROVIDER:-gemini}
       IMAGE_PROVIDER: ${IMAGE_PROVIDER:-gemini}
       GEMINI_API_KEY: ${GEMINI_API_KEY:-}
-      GEMINI_TEXT_MODEL: ${GEMINI_TEXT_MODEL:-gemini-3.5-flash}
+      GEMINI_TEXT_MODEL: ${GEMINI_TEXT_MODEL:-gemini-3.1-flash-lite}
       GEMINI_IMAGE_MODEL: ${GEMINI_IMAGE_MODEL:-gemini-3.1-flash-image}
+      VIDEO_PROVIDER: ${VIDEO_PROVIDER:-youtube}
+      YOUTUBE_API_KEY: ${YOUTUBE_API_KEY:-}
+      VIDEO_SEARCH_MAX_RESULTS: ${VIDEO_SEARCH_MAX_RESULTS:-5}
+      VIDEO_TRUSTED_CHANNELS: ${VIDEO_TRUSTED_CHANNELS:-}
       OLLAMA_URL: "http://ollama:11434"
       RAG_SERVICE_URL: "http://rag:3003"
       ANALYTICS_URL: "http://analytics:3004"
@@ -207,6 +211,8 @@ services:
     build: ./frontend
     environment:
       NEXT_PUBLIC_API_URL: "http://localhost/api"
+      API_PROXY_TARGET: "http://traefik"
+      HOST: "0.0.0.0"
       PORT: 3000
       NODE_ENV: production
     depends_on:
