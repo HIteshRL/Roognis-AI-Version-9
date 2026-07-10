@@ -9,6 +9,10 @@ class Settings(BaseSettings):
         "postgresql+psycopg://postgres:postgres@postgres:5432/roognis",
         description="SQLAlchemy database URL for the RAG schema.",
     )
+    rag_db_schema: str = Field(
+        "rag_db",
+        description="PostgreSQL schema used by the RAG/EKE service.",
+    )
     jwt_secret: str = Field(
         "dev-only-rag-secret",
         description="Shared JWT secret used to verify teacher ingestion requests.",

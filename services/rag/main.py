@@ -16,11 +16,23 @@
 # ─────────────────────────────────────────────────────────────────────────────
 
 import os
-from fastapi import FastAPI
+from contextlib import asynccontextmanager
 
+from fastapi import Depends, FastAPI, HTTPException, status
+
+from auth import AuthUser, require_teacher
 from config import get_settings
+from database import init_db
+import models  # noqa: F401
 
-app = FastAPI(title="Roognis RAG Service")
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    init_db()
+    yield
+
+
+app = FastAPI(title="Roognis RAG Service", lifespan=lifespan)
 app.state.settings = get_settings()
 
 
@@ -33,6 +45,30 @@ def health():
 def retrieve_stub(q: str = "", schoolId: str = "", subject: str = "", top: int = 5):
     # Returns empty chunks so AI service doesn't crash before RAG is implemented
     return []
+
+
+@app.post("/api/rag/upload")
+def upload_stub(_user: AuthUser = Depends(require_teacher)):
+    raise HTTPException(
+        status_code=status.HTTP_501_NOT_IMPLEMENTED,
+        detail="PDF ingestion upload is not implemented yet.",
+    )
+
+
+@app.get("/api/rag/upload/{doc_id}/status")
+def upload_status_stub(doc_id: str, _user: AuthUser = Depends(require_teacher)):
+    raise HTTPException(
+        status_code=status.HTTP_501_NOT_IMPLEMENTED,
+        detail=f"Document status is not implemented yet for {doc_id}.",
+    )
+
+
+@app.get("/api/rag/documents")
+def documents_stub(_user: AuthUser = Depends(require_teacher)):
+    raise HTTPException(
+        status_code=status.HTTP_501_NOT_IMPLEMENTED,
+        detail="Document listing is not implemented yet.",
+    )
 
 
 if __name__ == "__main__":
