@@ -28,6 +28,7 @@ from sqlalchemy.orm import Session
 from auth import AuthUser, require_teacher
 from config import Settings, get_settings
 from database import get_db, init_db
+from eke_pipeline import run_entity_extraction
 from models import (
     Document,
     DocumentIngestionJob,
@@ -127,6 +128,22 @@ def upload_document(
         metadata_json={"documentStatus": DocumentStatus.QUEUED.value},
     )
     db.add(job)
+    db.flush()
+
+    try:
+        extraction_result = run_entity_extraction(db, document, job)
+    except Exception as exc:
+        document.status = DocumentStatus.FAILED.value
+        document.error_message = f"PDF parsing failed: {exc}"
+        job.status = IngestionJobStatus.FAILED.value
+        job.stage = DocumentStatus.FAILED.value
+        job.error_message = document.error_message
+        db.commit()
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="PDF parsing failed.",
+        ) from exc
+
     db.commit()
     db.refresh(document)
 
@@ -134,6 +151,7 @@ def upload_document(
         "documentId": document.id,
         "status": document.status,
         "metadata": public_metadata(document),
+        "entitiesCreated": extraction_result.entities_created,
     }
 
 
@@ -221,6 +239,8 @@ def normalize_upload_metadata(
     }
     if difficulty and difficulty.strip():
         values["difficulty"] = difficulty.strip()
+    if values["curriculum"] == "NCERT":
+        values["sourceType"] = "ncert_textbook"
     parsed_tags = parse_tags(tags)
     if parsed_tags:
         values["tags"] = parsed_tags
