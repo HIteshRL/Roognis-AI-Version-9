@@ -26,6 +26,7 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from auth import AuthUser, require_teacher
+from chunking import generate_chunks_and_embeddings
 from config import Settings, get_settings
 from database import get_db, init_db
 from eke_pipeline import run_entity_extraction
@@ -132,16 +133,17 @@ def upload_document(
 
     try:
         extraction_result = run_entity_extraction(db, document, job)
+        chunking_result = generate_chunks_and_embeddings(db, document, job, settings)
     except Exception as exc:
         document.status = DocumentStatus.FAILED.value
-        document.error_message = f"PDF parsing failed: {exc}"
+        document.error_message = f"Ingestion failed: {exc}"
         job.status = IngestionJobStatus.FAILED.value
         job.stage = DocumentStatus.FAILED.value
         job.error_message = document.error_message
         db.commit()
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="PDF parsing failed.",
+            detail="Document ingestion failed.",
         ) from exc
 
     db.commit()
@@ -152,6 +154,9 @@ def upload_document(
         "status": document.status,
         "metadata": public_metadata(document),
         "entitiesCreated": extraction_result.entities_created,
+        "chunksCreated": chunking_result.chunks_created,
+        "chunksEmbedded": chunking_result.chunks_embedded,
+        "collection": chunking_result.collection_name,
     }
 
 

@@ -5,7 +5,7 @@ from sqlalchemy import select
 
 from database import SessionLocal
 from main import app
-from models import EducationalEntity, EntityRelationship, EntityType
+from models import EducationalEntity, EntityRelationship, EntityType, RetrievalChunk
 
 
 def upload_pdf(client, token_factory, **overrides):
@@ -55,8 +55,11 @@ def test_upload_persists_document_and_returns_contract_response(client, token_fa
     assert response.status_code == 200
     payload = response.json()
     assert payload["documentId"]
-    assert payload["status"] == "chunking"
+    assert payload["status"] == "ready"
     assert payload["entitiesCreated"] > 0
+    assert payload["chunksCreated"] > 0
+    assert payload["chunksEmbedded"] == payload["chunksCreated"]
+    assert payload["collection"].startswith("school_")
     assert payload["metadata"]["schoolId"] == "22222222-2222-2222-2222-222222222222"
     assert payload["metadata"]["board"] == "CBSE"
     assert payload["metadata"]["curriculum"] == "NCERT"
@@ -68,7 +71,7 @@ def test_upload_persists_document_and_returns_contract_response(client, token_fa
     assert (storage_root / "rag" / "uploads" / f"{payload['documentId']}.pdf").exists()
 
 
-def test_status_returns_entity_extraction_progress(client, token_factory):
+def test_status_returns_completed_chunking_progress(client, token_factory):
     upload = upload_pdf(client, token_factory).json()
 
     response = client.get(f"/api/rag/upload/{upload['documentId']}/status")
@@ -76,15 +79,13 @@ def test_status_returns_entity_extraction_progress(client, token_factory):
     assert response.status_code == 200
     payload = response.json()
     assert payload["documentId"] == upload["documentId"]
-    assert payload["status"] == "chunking"
-    assert payload["progress"]["stage"] == "chunking"
-    assert payload["progress"]["percent"] == 55
+    assert payload["status"] == "ready"
+    assert payload["progress"]["stage"] == "ready"
+    assert payload["progress"]["percent"] == 100
     assert payload["progress"]["pagesParsed"] == 1
     assert payload["progress"]["entitiesCreated"] > 0
-    assert {
-        "chunksCreated": 0,
-        "chunksEmbedded": 0,
-    }.items() <= payload["progress"].items()
+    assert payload["progress"]["chunksCreated"] > 0
+    assert payload["progress"]["chunksEmbedded"] == payload["progress"]["chunksCreated"]
     assert payload["errorMessage"] is None
     assert payload["updatedAt"]
 
@@ -93,7 +94,7 @@ def test_document_list_is_school_scoped_and_filterable(client, token_factory):
     science_doc = upload_pdf(client, token_factory).json()
     upload_pdf(client, token_factory, subject="Maths", chapterName="Fractions")
 
-    response = client.get("/api/rag/documents?subject=Science&grade=8&status=chunking")
+    response = client.get("/api/rag/documents?subject=Science&grade=8&status=ready")
 
     assert response.status_code == 200
     documents = response.json()["documents"]
@@ -106,7 +107,7 @@ def test_document_list_is_school_scoped_and_filterable(client, token_factory):
         "chapterName": "Light: Mirrors and Lenses",
     }
     assert documents[0]["entityCount"] > 0
-    assert documents[0]["chunkCount"] == 0
+    assert documents[0]["chunkCount"] > 0
 
 
 def test_status_returns_404_for_another_school_document(client, token_factory):
@@ -179,3 +180,24 @@ def test_upload_extracts_canonical_concepts_and_classified_entities(client, toke
     assert definition.canonical_concept_id
     assert definition.metadata_json["sourceType"] == "ncert_textbook"
     assert relationships
+
+
+def test_upload_generates_semantic_chunks_with_embedding_metadata(client, token_factory):
+    payload = upload_pdf(client, token_factory).json()
+
+    with SessionLocal() as db:
+        chunks = db.scalars(
+            select(RetrievalChunk)
+            .where(RetrievalChunk.document_id == payload["documentId"])
+            .order_by(RetrievalChunk.chunk_index.asc())
+        ).all()
+
+    assert chunks
+    assert all(chunk.vector_id for chunk in chunks)
+    assert all(chunk.metadata_json["schoolId"] == "22222222-2222-2222-2222-222222222222" for chunk in chunks)
+    assert all(chunk.metadata_json["grade"] == 8 for chunk in chunks)
+    assert all(chunk.metadata_json["subject"] == "Science" for chunk in chunks)
+    assert all(chunk.metadata_json["chapterNumber"] == 10 for chunk in chunks)
+    assert all(chunk.metadata_json["collection"] == payload["collection"] for chunk in chunks)
+    assert any("Dentists use concave mirrors" in chunk.text for chunk in chunks)
+    assert any(chunk.chunk_type == "question" for chunk in chunks)
