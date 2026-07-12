@@ -777,8 +777,99 @@
       gap: 10px;
     }
 
+    .teacher-ingestion-grid {
+      grid-template-columns: minmax(0, 1.1fr) minmax(320px, 0.9fr);
+      align-items: start;
+    }
+
+    .ingestion-form {
+      display: grid;
+      gap: 14px;
+    }
+
+    .form-grid {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 14px;
+    }
+
+    .file-drop {
+      min-height: 118px;
+      padding: 16px;
+      display: grid;
+      place-items: center;
+      gap: 8px;
+      border: 1px dashed #bfccc4;
+      border-radius: var(--radius);
+      background: #fbfcfb;
+      text-align: center;
+      color: var(--muted);
+    }
+
+    .file-drop strong {
+      color: var(--ink);
+    }
+
+    .file-drop input {
+      max-width: 100%;
+    }
+
+    .upload-progress {
+      height: 10px;
+      overflow: hidden;
+      border: 1px solid var(--line);
+      border-radius: 999px;
+      background: #eef2ee;
+    }
+
+    .upload-progress-bar {
+      width: 0%;
+      height: 100%;
+      border-radius: inherit;
+      background: var(--green);
+      transition: width 180ms ease;
+    }
+
+    .document-list {
+      display: grid;
+      gap: 10px;
+    }
+
+    .document-list .list-item {
+      grid-template-columns: auto 1fr auto;
+    }
+
+    .library-summary {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 10px;
+      margin-bottom: 12px;
+    }
+
+    .library-stat {
+      min-height: 70px;
+      padding: 10px;
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      background: #fbfcfb;
+    }
+
+    .library-stat strong {
+      display: block;
+      margin-top: 7px;
+      font-size: 22px;
+      line-height: 1;
+    }
+
+    .library-stat span {
+      color: var(--muted);
+      font-size: 12px;
+      font-weight: 720;
+    }
+
     @media (max-width: 1100px) {
-      .student-chat-grid {
+      .student-chat-grid,
+      .teacher-ingestion-grid {
         grid-template-columns: 1fr;
       }
 
@@ -834,6 +925,8 @@
 
       .dashboard-grid,
       .chat-input,
+      .form-grid,
+      .library-summary,
       .prompt-row {
         grid-template-columns: 1fr;
       }
@@ -850,6 +943,15 @@
 
       .list-item {
         grid-template-columns: auto 1fr;
+      }
+
+      .document-list .list-item {
+        grid-template-columns: auto 1fr;
+      }
+
+      .document-list .list-item .actions {
+        grid-column: 2;
+        justify-content: flex-start;
       }
 
       .list-item .btn,
@@ -1024,10 +1126,10 @@
                 <div class="panel-title">Backend boundary</div>
               </div>
               <div class="panel-body status-list">
-                <div class="status-row"><span>RAG retrieval</span><strong>Stub</strong></div>
+                <div class="status-row"><span>RAG retrieval</span><strong>Ready</strong></div>
+                <div class="status-row"><span>Teacher ingestion</span><strong>Ready</strong></div>
                 <div class="status-row"><span>Analytics dashboard</span><strong>Stub</strong></div>
                 <div class="status-row"><span>Quiz generation</span><strong>Not built</strong></div>
-                <div class="status-row"><span>Teacher and parent dashboards</span><strong>Next phase</strong></div>
               </div>
             </section>
           </div>
@@ -1185,8 +1287,14 @@
           <div class="page-head">
             <div>
               <p class="eyebrow">Teacher MVP</p>
-              <h1>Teacher workspace is not the active MVP yet.</h1>
-              <p class="subtext">The backend currently supports role login and parent linking. Quiz and class analytics need their services before this dashboard becomes real.</p>
+              <h1>Prepare textbook knowledge for the tutor.</h1>
+              <p class="subtext">Teacher auth and RAG ingestion are now wired; quiz and class analytics still wait for their service layer.</p>
+            </div>
+            <div class="actions">
+              <button class="btn primary" data-route="teacher-ingestion">
+                <svg class="icon" viewBox="0 0 24 24"><path d="M12 16V4"/><path d="m7 9 5-5 5 5"/><path d="M4 20h16"/></svg>
+                Upload PDF
+              </button>
             </div>
           </div>
           <div class="grid dashboard-grid">
@@ -1197,7 +1305,8 @@
               <div class="panel-body status-list">
                 <div class="status-row"><span>Teacher auth role</span><strong>Ready</strong></div>
                 <div class="status-row"><span>JWT protected routes</span><strong>Ready</strong></div>
-                <div class="status-row"><span>Parent-student link route</span><strong>Ready</strong></div>
+                <div class="status-row"><span>RAG document upload</span><strong>Ready</strong></div>
+                <div class="status-row"><span>EKE chunk retrieval</span><strong>Ready</strong></div>
               </div>
             </section>
             <section class="panel span-6">
@@ -1221,6 +1330,148 @@
                 </div>
               </div>
             </section>
+          </div>
+        </section>
+
+        <section class="view" id="teacher-ingestion">
+          <div class="page-head">
+            <div>
+              <p class="eyebrow">Knowledge Ingestion</p>
+              <h1>Upload a textbook chapter PDF.</h1>
+              <p class="subtext">The RAG service stores the document, extracts EKE entities, creates chunks, and indexes embeddings for tutor retrieval.</p>
+            </div>
+            <div class="actions">
+              <button class="btn" id="refresh-documents-btn" type="button">
+                <svg class="icon" viewBox="0 0 24 24"><path d="M21 12a9 9 0 0 1-15 6.7L3 16"/><path d="M3 21v-5h5"/><path d="M3 12a9 9 0 0 1 15-6.7L21 8"/><path d="M21 3v5h-5"/></svg>
+                Refresh
+              </button>
+            </div>
+          </div>
+
+          <div class="grid teacher-ingestion-grid">
+            <section class="panel">
+              <div class="panel-header">
+                <div class="panel-title">
+                  <svg class="icon" viewBox="0 0 24 24"><path d="M12 16V4"/><path d="m7 9 5-5 5 5"/><path d="M4 20h16"/></svg>
+                  PDF upload
+                </div>
+                <span class="pill" id="ingestion-status-pill"><span class="dot"></span>Ready</span>
+              </div>
+              <div class="panel-body">
+                <form class="ingestion-form" id="ingestion-form">
+                  <label class="file-drop" for="ingestion-file">
+                    <strong id="ingestion-file-label">Select PDF</strong>
+                    <span class="small">PDF only, up to the RAG service limit.</span>
+                    <input id="ingestion-file" name="file" type="file" accept="application/pdf,.pdf" required>
+                  </label>
+
+                  <div class="form-grid">
+                    <div class="field-group">
+                      <label for="ingestion-board">Board</label>
+                      <select id="ingestion-board" name="board" required>
+                        <option value="CBSE">CBSE</option>
+                        <option value="ICSE">ICSE</option>
+                        <option value="State">State</option>
+                        <option value="IB">IB</option>
+                      </select>
+                    </div>
+                    <div class="field-group">
+                      <label for="ingestion-curriculum">Curriculum</label>
+                      <select id="ingestion-curriculum" name="curriculum" required>
+                        <option value="NCERT">NCERT</option>
+                        <option value="SCERT">SCERT</option>
+                        <option value="School">School</option>
+                      </select>
+                    </div>
+                    <div class="field-group">
+                      <label for="ingestion-grade">Grade</label>
+                      <select id="ingestion-grade" name="grade" required>
+                        <option value="6">6</option>
+                        <option value="7">7</option>
+                        <option value="8" selected>8</option>
+                        <option value="9">9</option>
+                        <option value="10">10</option>
+                        <option value="11">11</option>
+                        <option value="12">12</option>
+                      </select>
+                    </div>
+                    <div class="field-group">
+                      <label for="ingestion-subject">Subject</label>
+                      <input class="field" id="ingestion-subject" name="subject" value="Science" required>
+                    </div>
+                    <div class="field-group">
+                      <label for="ingestion-book">Book</label>
+                      <input class="field" id="ingestion-book" name="book" value="Curiosity" required>
+                    </div>
+                    <div class="field-group">
+                      <label for="ingestion-chapter-number">Chapter</label>
+                      <input class="field" id="ingestion-chapter-number" name="chapterNumber" type="number" min="1" value="10" required>
+                    </div>
+                    <div class="field-group">
+                      <label for="ingestion-chapter-name">Chapter name</label>
+                      <input class="field" id="ingestion-chapter-name" name="chapterName" value="Light: Mirrors and Lenses" required>
+                    </div>
+                    <div class="field-group">
+                      <label for="ingestion-language">Language</label>
+                      <input class="field" id="ingestion-language" name="language" value="English" required>
+                    </div>
+                    <div class="field-group">
+                      <label for="ingestion-edition">Edition</label>
+                      <input class="field" id="ingestion-edition" name="edition" value="2026-27" required>
+                    </div>
+                  </div>
+
+                  <div class="upload-progress" aria-hidden="true">
+                    <div class="upload-progress-bar" id="ingestion-progress-bar"></div>
+                  </div>
+
+                  <div class="actions">
+                    <button class="btn" id="reset-ingestion-btn" type="reset">Reset</button>
+                    <button class="btn primary" id="ingestion-submit-btn" type="submit">
+                      <svg class="icon" viewBox="0 0 24 24"><path d="M12 16V4"/><path d="m7 9 5-5 5 5"/><path d="M4 20h16"/></svg>
+                      Upload
+                    </button>
+                  </div>
+                  <div class="form-status" id="ingestion-status">Ready for a teacher PDF.</div>
+                </form>
+              </div>
+            </section>
+
+            <div class="side-stack">
+              <section class="panel">
+                <div class="panel-header">
+                  <div class="panel-title">Latest upload</div>
+                  <span class="pill blue" id="ingestion-result-pill">No document</span>
+                </div>
+                <div class="panel-body status-list" id="ingestion-result">
+                  <div class="status-row"><span>Document</span><strong>-</strong></div>
+                  <div class="status-row"><span>Status</span><strong>Waiting</strong></div>
+                  <div class="status-row"><span>Progress</span><strong>0%</strong></div>
+                  <div class="status-row"><span>Entities</span><strong>-</strong></div>
+                  <div class="status-row"><span>Chunks</span><strong>-</strong></div>
+                </div>
+              </section>
+
+              <section class="panel">
+                <div class="panel-header">
+                  <div class="panel-title">Uploaded documents</div>
+                  <span class="pill" id="documents-count-pill">0 documents</span>
+                </div>
+                <div class="panel-body">
+                  <div class="library-summary" id="document-library-summary">
+                    <div class="library-stat"><span>Ready</span><strong>0</strong></div>
+                    <div class="library-stat"><span>Failed</span><strong>0</strong></div>
+                    <div class="library-stat"><span>Chunks</span><strong>0</strong></div>
+                  </div>
+                  <div class="document-list" id="teacher-documents">
+                    <div class="quiet-box">
+                      <strong>No documents loaded.</strong>
+                      <p>Sign in as a teacher and refresh after uploading a PDF.</p>
+                    </div>
+                  </div>
+                </div>
+              </section>
+            </div>
           </div>
         </section>
 
@@ -1274,6 +1525,7 @@
       chat: 'M21 15a4 4 0 0 1-4 4H8l-5 3V7a4 4 0 0 1 4-4h10a4 4 0 0 1 4 4z',
       image: 'M4 19h16M5 17l4-8 4 5 3-4 3 7',
       video: 'M3 5h18v14H3z M10 9l5 3-5 3',
+      upload: 'M12 16V4 M7 9l5-5 5 5 M4 20h16',
       user: 'M8 11a4 4 0 1 0 0-8 4 4 0 0 0 0 8z M2 21a6 6 0 0 1 12 0 M17 7v6M14 10h6',
     };
 
@@ -1292,11 +1544,12 @@
       },
       teacher: {
         label: 'Teacher workspace',
-        contextTitle: 'Next backend phase',
-        contextCopy: 'Quiz and analytics are not ready in the current MVP.',
+        contextTitle: 'Knowledge base',
+        contextCopy: 'Upload teacher-approved PDFs for EKE retrieval.',
         defaultRoute: 'teacher-mvp',
         nav: [
           ['teacher-mvp', 'MVP Status', iconPaths.dashboard],
+          ['teacher-ingestion', 'Ingestion', iconPaths.upload],
         ],
       },
       parent: {
@@ -1315,7 +1568,8 @@
       'student-tutor': ['Tutor Chat', 'Student AI chat with safety checks and session history'],
       'student-diagrams': ['Diagrams', 'Safe image job creation and status polling'],
       'student-videos': ['Videos', 'Real-time video recommendations from tutor chat'],
-      'teacher-mvp': ['Teacher MVP Status', 'Teacher features wait for Quiz and Analytics services'],
+      'teacher-mvp': ['Teacher MVP Status', 'RAG ingestion is ready; quiz and analytics are later services'],
+      'teacher-ingestion': ['Knowledge Ingestion', 'Upload PDFs into the Educational Knowledge Engine'],
       'parent-mvp': ['Parent MVP Status', 'Parent progress waits for Analytics and Quiz data'],
     };
 
@@ -1335,6 +1589,8 @@
       lastAssistantMessageId: null,
       feedbackRating: 5,
       chatVideoRecommendations: [],
+      ingestionPollTimer: null,
+      activeIngestionDocumentId: null,
     };
 
     const authScreen = document.querySelector('#auth-screen');
@@ -1413,12 +1669,44 @@
         payload = JSON.parse(rawBody);
       }
       if (!response.ok) {
-        throw new ApiError(payload?.error || `Request failed with status ${response.status}`, response.status, payload);
+        throw new ApiError(apiErrorMessage(payload, response.status), response.status, payload);
       }
       if (!contentType.includes('application/json')) {
         throw new ApiError('Backend API returned a non-JSON response.', response.status, null);
       }
       return payload;
+    }
+
+    async function apiForm(path, formData) {
+      const response = await fetch(path, {
+        method: 'POST',
+        credentials: 'include',
+        body: formData,
+      });
+      const contentType = response.headers.get('content-type') || '';
+      const rawBody = await response.text();
+      let payload = null;
+      if (contentType.includes('application/json') && rawBody) {
+        payload = JSON.parse(rawBody);
+      }
+      if (!response.ok) {
+        throw new ApiError(apiErrorMessage(payload, response.status), response.status, payload);
+      }
+      if (!contentType.includes('application/json')) {
+        throw new ApiError('Backend API returned a non-JSON response.', response.status, null);
+      }
+      return payload;
+    }
+
+    function apiErrorMessage(payload, status) {
+      if (payload?.error) return payload.error;
+      if (typeof payload?.detail === 'string') return payload.detail;
+      if (Array.isArray(payload?.detail)) {
+        return payload.detail
+          .map(item => item?.msg || item?.message || String(item))
+          .join('; ');
+      }
+      return `Request failed with status ${status}`;
     }
 
     function renderNav(role) {
@@ -1440,6 +1728,8 @@
       state.user = user;
       state.sessionId = null;
       state.lastAssistantMessageId = null;
+      state.activeIngestionDocumentId = null;
+      clearTimeout(state.ingestionPollTimer);
 
       const config = roleConfig[role];
       document.querySelector('#user-name').textContent = user.name;
@@ -1451,6 +1741,7 @@
       renderNav(role);
       showRoute(config.defaultRoute);
       if (role === 'student') loadVideoTopics();
+      if (role === 'teacher') loadTeacherDocuments();
       if (role === 'parent') loadLinkedChildren();
     }
 
@@ -1462,6 +1753,7 @@
       const meta = routeMeta[route] || routeMeta[roleConfig[state.role].defaultRoute];
       document.querySelector('#topbar-title').textContent = meta[0];
       document.querySelector('#topbar-subtitle').textContent = meta[1];
+      if (route === 'teacher-ingestion') loadTeacherDocuments();
     }
 
     document.querySelector('#login-form').addEventListener('submit', async event => {
@@ -1521,6 +1813,8 @@
       state.demoMode = false;
       state.sessionId = null;
       state.lastAssistantMessageId = null;
+      state.activeIngestionDocumentId = null;
+      clearTimeout(state.ingestionPollTimer);
       document.querySelector('#session-pill').innerHTML = '<span class="dot"></span>Ready';
       appShell.classList.add('hidden');
       authScreen.classList.remove('hidden');
@@ -1531,6 +1825,265 @@
       const routeButton = event.target.closest('[data-route]');
       if (!routeButton) return;
       showRoute(routeButton.dataset.route);
+    });
+
+    function setIngestionState(kind, copy, progress) {
+      const pill = document.querySelector('#ingestion-status-pill');
+      const status = document.querySelector('#ingestion-status');
+      const bar = document.querySelector('#ingestion-progress-bar');
+      const clampedProgress = Math.max(0, Math.min(Number(progress || 0), 100));
+      const classes = {
+        ready: 'pill',
+        uploading: 'pill blue',
+        processing: 'pill amber',
+        complete: 'pill',
+        failed: 'pill red',
+      };
+      pill.className = classes[kind] || 'pill';
+      pill.innerHTML = `<span class="dot"></span>${copy}`;
+      status.textContent = copy;
+      bar.style.width = `${clampedProgress}%`;
+    }
+
+    function formatStatus(value) {
+      return String(value || 'waiting')
+        .replace(/_/g, ' ')
+        .replace(/\b\w/g, char => char.toUpperCase());
+    }
+
+    function renderIngestionResult(upload, statusPayload) {
+      const result = document.querySelector('#ingestion-result');
+      const pill = document.querySelector('#ingestion-result-pill');
+      const progress = statusPayload?.progress || {};
+      const status = statusPayload?.status || upload?.status || 'waiting';
+      const documentId = upload?.documentId || statusPayload?.documentId || '-';
+      const entities = upload?.entitiesCreated ?? progress.entitiesCreated ?? '-';
+      const chunksCreated = upload?.chunksCreated ?? progress.chunksCreated ?? '-';
+      const chunksEmbedded = upload?.chunksEmbedded ?? progress.chunksEmbedded ?? '-';
+      const percent = progress.percent ?? (status === 'ready' ? 100 : 0);
+      const errorMessage = statusPayload?.errorMessage || upload?.errorMessage || '';
+      const readyCopy = status === 'ready' ? 'Ready for retrieval' : formatStatus(status);
+      pill.className = statusPillClass(status);
+      pill.textContent = formatStatus(status);
+      result.innerHTML = `
+        <div class="status-row"><span>Document</span><strong>${escapeHtml(shortId(documentId))}</strong></div>
+        <div class="status-row"><span>Status</span><strong>${escapeHtml(readyCopy)}</strong></div>
+        <div class="status-row"><span>Progress</span><strong>${escapeHtml(String(percent))}%</strong></div>
+        <div class="status-row"><span>Entities</span><strong>${escapeHtml(String(entities))}</strong></div>
+        <div class="status-row"><span>Chunks</span><strong>${escapeHtml(String(chunksCreated))} / ${escapeHtml(String(chunksEmbedded))}</strong></div>
+        ${errorMessage ? `<div class="status-row"><span>Failure</span><strong>${escapeHtml(errorMessage)}</strong></div>` : ''}
+      `;
+    }
+
+    function shortId(value) {
+      const text = String(value || '-');
+      return text.length > 12 ? `${text.slice(0, 8)}...${text.slice(-4)}` : text;
+    }
+
+    async function loadTeacherDocuments() {
+      const list = document.querySelector('#teacher-documents');
+      const countPill = document.querySelector('#documents-count-pill');
+      if (!list || state.role !== 'teacher') return;
+      if (state.demoMode) {
+        countPill.textContent = '0 documents';
+        renderLibrarySummary([]);
+        list.innerHTML = '<div class="quiet-box"><strong>Backend sign-in required.</strong><p>Use the teacher account against running services to upload and list PDFs.</p></div>';
+        return;
+      }
+
+      try {
+        const payload = await apiJson('/api/rag/documents');
+        setConnection(true, 'Backend connected');
+        renderTeacherDocuments(payload.documents || []);
+      } catch (error) {
+        countPill.textContent = '0 documents';
+        renderLibrarySummary([]);
+        list.innerHTML = `<div class="quiet-box"><strong>Documents unavailable.</strong><p>${escapeHtml(error.message)}</p></div>`;
+        if (!error.status) setConnection(false, 'Backend unavailable');
+      }
+    }
+
+    function renderTeacherDocuments(documents) {
+      const list = document.querySelector('#teacher-documents');
+      const countPill = document.querySelector('#documents-count-pill');
+      countPill.textContent = `${documents.length} ${documents.length === 1 ? 'document' : 'documents'}`;
+      renderLibrarySummary(documents);
+      if (!documents.length) {
+        list.innerHTML = '<div class="quiet-box"><strong>No PDFs indexed yet.</strong><p>Uploaded teacher documents will appear here after ingestion.</p></div>';
+        return;
+      }
+      list.innerHTML = documents.map(item => {
+        const metadata = item.metadata || {};
+        const subtitle = [
+          metadata.subject,
+          metadata.grade ? `Grade ${metadata.grade}` : '',
+          metadata.chapterNumber ? `Chapter ${metadata.chapterNumber}` : '',
+          metadata.chapterName,
+        ].filter(Boolean).join(' - ');
+        const entityCount = Number(item.entityCount || 0);
+        const chunkCount = Number(item.chunkCount || 0);
+        const statusCopy = item.status === 'ready' ? 'Ready' : formatStatus(item.status);
+        return `
+          <div class="list-item" data-document-id="${escapeHtml(item.documentId)}">
+            <div class="tile-icon">
+              <svg class="icon" viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6"/></svg>
+            </div>
+            <div>
+              <div class="item-title">${escapeHtml(item.filename || 'Uploaded PDF')}</div>
+              <div class="item-subtitle">${escapeHtml(subtitle || 'Document metadata unavailable')}</div>
+              <div class="small">${entityCount} entities - ${chunkCount} chunks</div>
+            </div>
+            <div class="actions">
+              <span class="${statusPillClass(item.status)}">${escapeHtml(statusCopy)}</span>
+              <button class="btn icon-only" type="button" data-document-status="${escapeHtml(item.documentId)}" aria-label="Load document status">
+                <svg class="icon" viewBox="0 0 24 24"><path d="M3 12h4l3 8 4-16 3 8h4"/></svg>
+              </button>
+            </div>
+          </div>
+        `;
+      }).join('');
+    }
+
+    function renderLibrarySummary(documents) {
+      const summary = document.querySelector('#document-library-summary');
+      if (!summary) return;
+      const ready = documents.filter(item => item.status === 'ready').length;
+      const failed = documents.filter(item => item.status === 'failed').length;
+      const chunks = documents.reduce((sum, item) => sum + Number(item.chunkCount || 0), 0);
+      const entities = documents.reduce((sum, item) => sum + Number(item.entityCount || 0), 0);
+      summary.innerHTML = `
+        <div class="library-stat"><span>Ready</span><strong>${ready}</strong></div>
+        <div class="library-stat"><span>Failed</span><strong>${failed}</strong></div>
+        <div class="library-stat"><span>Chunks / Entities</span><strong>${chunks} / ${entities}</strong></div>
+      `;
+    }
+
+    function statusPillClass(status) {
+      if (status === 'ready') return 'pill';
+      if (status === 'failed') return 'pill red';
+      return 'pill amber';
+    }
+
+    function startIngestionStatusPolling(documentId, uploadPayload) {
+      clearTimeout(state.ingestionPollTimer);
+      if (!documentId || state.demoMode) return;
+      state.activeIngestionDocumentId = documentId;
+
+      const poll = async () => {
+        try {
+          const statusPayload = await apiJson(`/api/rag/upload/${encodeURIComponent(documentId)}/status`);
+          renderIngestionResult(uploadPayload, statusPayload);
+          const percent = statusPayload.progress?.percent ?? 0;
+          if (statusPayload.status === 'ready') {
+            setIngestionState('complete', 'Ready for retrieval', 100);
+            await loadTeacherDocuments();
+            return;
+          }
+          if (statusPayload.status === 'failed') {
+            setIngestionState('failed', statusPayload.errorMessage || 'Ingestion failed', percent);
+            await loadTeacherDocuments();
+            return;
+          }
+          setIngestionState('processing', formatStatus(statusPayload.progress?.stage || statusPayload.status), percent);
+          state.ingestionPollTimer = setTimeout(poll, 1400);
+        } catch (error) {
+          setIngestionState('failed', error.message, 0);
+          if (!error.status) setConnection(false, 'Backend unavailable');
+        }
+      };
+
+      poll();
+    }
+
+    async function loadDocumentIngestionStatus(documentId) {
+      if (!documentId || state.demoMode) return;
+      clearTimeout(state.ingestionPollTimer);
+      state.activeIngestionDocumentId = documentId;
+      setIngestionState('processing', 'Loading document status', 15);
+
+      try {
+        const statusPayload = await apiJson(`/api/rag/upload/${encodeURIComponent(documentId)}/status`);
+        const percent = statusPayload.progress?.percent ?? 0;
+        renderIngestionResult({ documentId }, statusPayload);
+
+        if (statusPayload.status === 'ready') {
+          setIngestionState('complete', 'Ready for retrieval', 100);
+          await loadTeacherDocuments();
+          return;
+        }
+        if (statusPayload.status === 'failed') {
+          setIngestionState('failed', statusPayload.errorMessage || 'Ingestion failed', percent);
+          await loadTeacherDocuments();
+          return;
+        }
+
+        setIngestionState('processing', formatStatus(statusPayload.progress?.stage || statusPayload.status), percent);
+        state.ingestionPollTimer = setTimeout(() => {
+          loadDocumentIngestionStatus(documentId);
+        }, 1400);
+      } catch (error) {
+        setIngestionState('failed', error.message, 0);
+        if (!error.status) setConnection(false, 'Backend unavailable');
+      }
+    }
+
+    document.querySelector('#ingestion-file').addEventListener('change', event => {
+      const file = event.target.files?.[0];
+      document.querySelector('#ingestion-file-label').textContent = file ? file.name : 'Select PDF';
+    });
+
+    document.querySelector('#ingestion-form').addEventListener('reset', () => {
+      clearTimeout(state.ingestionPollTimer);
+      setTimeout(() => {
+        document.querySelector('#ingestion-file-label').textContent = 'Select PDF';
+        setIngestionState('ready', 'Ready', 0);
+        document.querySelector('#ingestion-status').textContent = 'Ready for a teacher PDF.';
+      }, 0);
+    });
+
+    document.querySelector('#ingestion-form').addEventListener('submit', async event => {
+      event.preventDefault();
+      const form = event.currentTarget;
+      const submitButton = document.querySelector('#ingestion-submit-btn');
+      const file = document.querySelector('#ingestion-file').files?.[0];
+      if (!file) {
+        setIngestionState('failed', 'Select a PDF first', 0);
+        return;
+      }
+      if (state.demoMode) {
+        setIngestionState('failed', 'Backend sign-in required for upload', 0);
+        return;
+      }
+
+      clearTimeout(state.ingestionPollTimer);
+      submitButton.disabled = true;
+      setIngestionState('uploading', 'Uploading PDF', 25);
+
+      try {
+        const payload = await apiForm('/api/rag/upload', new FormData(form));
+        setConnection(true, 'Backend connected');
+        renderIngestionResult(payload, null);
+        setIngestionState(
+          payload.status === 'ready' ? 'complete' : 'processing',
+          payload.status === 'ready' ? 'Ready for retrieval' : formatStatus(payload.status),
+          payload.status === 'ready' ? 100 : 65
+        );
+        startIngestionStatusPolling(payload.documentId, payload);
+        await loadTeacherDocuments();
+      } catch (error) {
+        setIngestionState('failed', error.message, 0);
+        if (!error.status) setConnection(false, 'Backend unavailable');
+      } finally {
+        submitButton.disabled = false;
+      }
+    });
+
+    document.querySelector('#refresh-documents-btn').addEventListener('click', loadTeacherDocuments);
+
+    document.querySelector('#teacher-documents').addEventListener('click', event => {
+      const button = event.target.closest('[data-document-status]');
+      if (!button) return;
+      loadDocumentIngestionStatus(button.dataset.documentStatus);
     });
 
     function appendMessage(role, text, meta) {

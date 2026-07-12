@@ -134,7 +134,7 @@ parent_student  — parent_id, student_id  (composite PK, idempotent linking)
 
 - Docker Desktop or Docker + `docker-compose`
 - Gemini API key for MVP chat and image generation
-- More disk space only if using optional local Ollama/ComfyUI fallback
+- Disk space for the Ollama embedding model used by RAG ingestion; more disk space if using optional ComfyUI image fallback
 
 ### 1. Configure environment
 
@@ -165,7 +165,7 @@ sh scripts/comfyui-model-download.sh
 
 ### 3. Start the full stack
 
-Default Gemini MVP startup should be lightweight because it does not pull local LLM/image models.
+Default Gemini MVP startup starts Ollama for RAG embeddings and ChromaDB for vector storage. ComfyUI remains behind the optional `local-ai` profile.
 
 ```sh
 docker-compose up --build
@@ -187,6 +187,111 @@ LLM_PROVIDER=ollama IMAGE_PROVIDER=comfyui docker-compose --profile local-ai up 
 | ComfyUI | http://localhost:8188 | Optional local image generation UI |
 
 Log in with any demo account. The browser will redirect you to the correct dashboard for your role.
+
+---
+
+## EKE Ingestion Setup and Verification
+
+The RAG service now includes the Educational Knowledge Engine ingestion path. Teachers can upload textbook PDFs, the service persists document/job lifecycle rows in `rag_db`, extracts educational entities, generates retrieval chunks, embeds them with Ollama, stores vectors in ChromaDB, and serves AI-compatible retrieval chunks back to the AI service.
+
+### RAG/EKE environment variables
+
+Docker Compose sets the runtime defaults for local development. Override these only when changing storage, database, or embedding infrastructure:
+
+| Variable | Default in local stack | Purpose |
+|---|---|---|
+| `DATABASE_URL` | `postgresql://postgres:<DB_PASSWORD>@postgres:5432/roognis` | SQLAlchemy connection for `rag_db` tables |
+| `RAG_DB_SCHEMA` | `rag_db` | PostgreSQL schema for documents, jobs, entities, relationships, and chunks |
+| `JWT_SECRET` | from `.env` | Verifies teacher JWT cookies for ingestion endpoints |
+| `CHROMA_URL` | `http://chromadb:8000` | ChromaDB HTTP endpoint for vector writes/queries |
+| `OLLAMA_URL` | `http://ollama:11434` | Ollama endpoint for embedding generation |
+| `OLLAMA_EMBEDDING_MODEL` | `nomic-embed-text` | Embedding model used for chunks and retrieve queries |
+| `FILE_STORAGE_PATH` | `/app/storage` | Shared volume path for uploaded PDFs |
+| `RAG_MAX_UPLOAD_MB` | `50` | Maximum PDF upload size |
+| `RAG_COLLECTION_PREFIX` | `school` | Prefix for per-school/per-subject Chroma collections |
+| `RAG_TEST_MODE` | `false` | Test-only deterministic embedding mode used by pytest |
+
+For local EKE ingestion, make sure the embedding service is available. The default stack starts ChromaDB and Ollama; the bundled Ollama init script pulls `nomic-embed-text` idempotently before RAG starts:
+
+```sh
+LLM_PROVIDER=ollama IMAGE_PROVIDER=comfyui docker-compose --profile local-ai up --build
+```
+
+### Frontend teacher flow
+
+1. Open `http://localhost:3000`.
+2. Log in as `teacher@demo.com` with password `demo1234`.
+3. In the teacher sidebar, open `Ingestion`.
+4. Select a PDF and fill the required metadata fields: board, curriculum, grade, subject, book, chapter, chapter name, language, and edition.
+5. Click `Upload`.
+6. Watch the latest upload panel move through upload/processing states until it shows `Ready for retrieval` or a failure message.
+7. Use `Refresh` or the status icon beside any document to reload document status, entity count, chunk count, and ready/failed state.
+
+### Curl examples
+
+All requests go through Traefik at `http://localhost`. Use a real PDF path for `file=@...`.
+
+```sh
+# Login as teacher and save the JWT cookie
+curl -s -c /tmp/roognis-teacher-cookies.txt -X POST http://localhost/api/auth/login -H "Content-Type: application/json" -d '{"email":"teacher@demo.com","password":"demo1234"}'
+
+# Upload a PDF chapter for ingestion
+curl -s -b /tmp/roognis-teacher-cookies.txt -X POST http://localhost/api/rag/upload -F "file=@/absolute/path/to/chapter.pdf;type=application/pdf" -F "board=CBSE" -F "curriculum=NCERT" -F "grade=8" -F "subject=Science" -F "book=Curiosity" -F "chapterNumber=10" -F "chapterName=Light: Mirrors and Lenses" -F "language=English" -F "edition=2026-27"
+
+# Check one upload; replace DOC_ID with the documentId from the upload response
+curl -s -b /tmp/roognis-teacher-cookies.txt http://localhost/api/rag/upload/DOC_ID/status
+
+# List uploaded documents for the teacher's school
+curl -s -b /tmp/roognis-teacher-cookies.txt "http://localhost/api/rag/documents?subject=Science&grade=8&status=ready"
+
+# Retrieve AI-compatible chunks; this endpoint intentionally does not require JWT
+curl -s "http://localhost/api/rag/retrieve?q=dentist%20mirror&schoolId=550e8400-e29b-41d4-a716-446655440000&subject=Science&grade=8&chapterNumber=10&top=5"
+```
+
+Expected retrieval shape:
+
+```json
+{
+  "chunks": [
+    {
+      "text": "Uses of Concave Mirror...\nDentists use concave mirrors...",
+      "source": "NCERT Science Grade 8, Curiosity, Chapter 10, p.1",
+      "score": 0.8,
+      "metadata": {
+        "schoolId": "550e8400-e29b-41d4-a716-446655440000",
+        "grade": 8,
+        "subject": "Science",
+        "chapterNumber": 10
+      }
+    }
+  ]
+}
+```
+
+### Verification steps
+
+Use these checks before raising or reviewing the EKE ingestion PR:
+
+```sh
+# Python RAG service tests
+python -m pytest services/rag/tests
+
+# Python syntax check
+python -m compileall -q services/rag
+
+# Frontend inline script and server syntax
+node -e "const fs=require('fs'); const html=fs.readFileSync('frontend/index.html','utf8'); const m=html.match(/<script>([\\s\\S]*)<\\/script>/); if(!m) throw new Error('script not found'); new Function(m[1]); console.log('inline script ok');"
+node --check frontend/server.js
+```
+
+Manual verification:
+
+- Uploading without a teacher cookie returns `401`; uploading with a student cookie returns `403`.
+- Non-PDF, empty PDF, invalid grade, and invalid chapter metadata are rejected.
+- A successful upload returns `status: "ready"`, `entitiesCreated`, `chunksCreated`, `chunksEmbedded`, and `collection`.
+- `GET /api/rag/upload/:docId/status` reports progress and failure details.
+- `GET /api/rag/documents` is school-scoped and shows entity/chunk counts.
+- `GET /api/rag/retrieve` returns `{ "chunks": [...] }` where each chunk includes `text`, `source`, and `score`, preserving the AI service contract.
 
 ---
 
@@ -247,15 +352,26 @@ See `roognis-ai-design-complete.pdf → LLD v3 → AI Service :3002` for full en
 
 The AI Service owns MVP child safety: it blocks unsafe chat/image prompts before provider calls, validates generated chat output before SSE streaming, returns a safe refusal for blocked content, and emits non-blocking safety analytics events.
 
-### RAG Service — What to Build
+### RAG / EKE Service — Current Surface
 
-**File:** `services/rag/main.py` (replace the stub)  
-**Schema:** `rag_db` — documents table (SQLAlchemy, not Prisma)  
-**Key dependencies:** `fastapi`, `uvicorn`, `langchain`, `pymupdf`, `chromadb`, `pyjwt`, `sqlalchemy`
+**Files:** `services/rag/main.py`, `services/rag/eke_pipeline.py`, `services/rag/chunking.py`, `services/rag/retrieval.py`
 
-The `/api/rag/retrieve` endpoint is called internally by the AI Service with no JWT. All other endpoints require authentication.
+**Schema:** `rag_db` — SQLAlchemy-managed documents, ingestion jobs, educational entities, relationships, and retrieval chunks
 
-See `roognis-ai-design-complete.pdf → LLD v3 → RAG Service :3003` for upload flow, chunking config (512 tokens, 50 overlap), ChromaDB collection naming (`school_{schoolId}_{subject}`), and Python JWT middleware.
+**Key dependencies:** `fastapi`, `uvicorn`, `pymupdf`, `chromadb`, `ollama`, `pyjwt`, `sqlalchemy`
+
+Implemented endpoints:
+
+| Method | Path | Auth | Description |
+|---|---|---|---|
+| `POST` | `/api/rag/upload` | Teacher JWT | Upload a PDF and run EKE ingestion |
+| `GET` | `/api/rag/upload/:docId/status` | Teacher JWT | Poll document/job lifecycle status |
+| `GET` | `/api/rag/documents` | Teacher JWT | List school-scoped uploaded documents |
+| `GET` | `/api/rag/retrieve` | None | Return AI-compatible `{ chunks }` with `text`, `source`, and `score` |
+
+The retrieve endpoint is called internally by the AI Service without JWT. Document management remains teacher-only and school-scoped.
+
+Detailed contract: `docs/backend-services/RAG_EKE_INGESTION_CONTRACT.md`.
 
 ### Analytics Service — What to Build
 
@@ -267,9 +383,10 @@ The `/api/analytics/event` endpoint accepts fire-and-forget events from other se
 
 The intervention rule flags a student if: `AVG(feedback rating) < 3.0` OR `COUNT(DISTINCT session_id) < 3` in the last 7 days — calculated at query time, no cron needed.
 
-### Frontend — What to Build
+### Frontend — Current Surface
 
-**File:** Replace `frontend/` with a full Next.js application.  
+**File:** `frontend/index.html` served by `frontend/server.js`
+
 **API base URL:** `http://localhost/api` (configured via `NEXT_PUBLIC_API_URL` in compose)
 
 All requests should be made with `credentials: 'include'` so the browser sends the HttpOnly JWT cookie:
@@ -278,10 +395,10 @@ All requests should be made with `credentials: 'include'` so the browser sends t
 fetch('http://localhost/api/auth/me', { credentials: 'include' })
 ```
 
-After login, redirect based on `role`:
-- `student` → `/chat`
-- `teacher` → `/dashboard`
-- `parent` → `/progress`
+After login, the single-page frontend switches workspace based on `role`:
+- `student` → tutor chat, diagrams, videos, and feedback
+- `teacher` → EKE ingestion workspace and document library
+- `parent` → linked-child placeholder pending Analytics/Quiz data
 
 ### Rebuilding a Single Service
 
@@ -409,9 +526,9 @@ roognis/
 │   │   ├── prisma/schema.prisma
 │   │   └── scripts/seed.js
 │   ├── ai/                         🔧 Stub — implement per LLD v3
-│   ├── rag/                        🔧 Stub — implement per LLD v3
+│   ├── rag/                        Complete — RAG/EKE ingestion and retrieval
 │   └── analytics/                  🔧 Stub — implement per LLD v3
-├── frontend/                       🔧 Stub — implement Next.js app
+├── frontend/                       MVP single-page app with teacher ingestion
 └── kubernetes/                     — Production K8s manifests
     ├── kustomization.yaml
     ├── namespace.yaml

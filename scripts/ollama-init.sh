@@ -13,11 +13,11 @@ done
 echo "[ollama-init] Ollama API is up."
 
 # Pull required models — idempotent, skips if already in the volume
-echo "[ollama-init] Pulling qwen2.5 (text inference)..."
-ollama pull qwen2.5
-
 echo "[ollama-init] Pulling nomic-embed-text (RAG embeddings)..."
 ollama pull nomic-embed-text
+
+echo "[ollama-init] Pulling qwen2.5 (text inference fallback)..."
+ollama pull qwen2.5
 
 echo "[ollama-init] All models ready. Roognis AI is fully loaded."
 

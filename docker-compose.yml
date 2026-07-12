@@ -47,15 +47,14 @@ services:
 
   # ── AI Layer ─────────────────────────────────────────────────────────────────
   ollama:
-    profiles: ["local-ai"]
     image: ollama/ollama:latest
     volumes:
       - ollama_models:/root/.ollama
       - ./scripts/ollama-init.sh:/ollama-init.sh:ro
     entrypoint: ["/bin/sh", "/ollama-init.sh"]
     healthcheck:
-      # Passes only after qwen2.5 is fully pulled and ready
-      test: ["CMD-SHELL", "ollama list 2>/dev/null | grep -q qwen2.5"]
+      # Passes only after the RAG embedding model is pulled and ready.
+      test: ["CMD-SHELL", "ollama list 2>/dev/null | grep -q nomic-embed-text"]
       interval: 30s
       timeout: 10s
       retries: 20
@@ -161,10 +160,13 @@ services:
       DATABASE_URL: "postgresql://postgres:${DB_PASSWORD}@postgres:5432/roognis"
       CHROMA_URL: "http://chromadb:8000"
       OLLAMA_URL: "http://ollama:11434"
+      OLLAMA_EMBEDDING_MODEL: ${OLLAMA_EMBEDDING_MODEL:-nomic-embed-text}
       DEMO_SCHOOL_ID: ${DEMO_SCHOOL_ID}
       JWT_SECRET: ${JWT_SECRET}
       FILE_STORAGE_PATH: /app/storage
       PORT: 3003
+      RAG_COLLECTION_PREFIX: ${RAG_COLLECTION_PREFIX:-school}
+      RAG_MAX_UPLOAD_MB: ${RAG_MAX_UPLOAD_MB:-50}
       # Cloud swap — set to use Pinecone instead of ChromaDB
       PINECONE_API_KEY: ${PINECONE_API_KEY:-}
       PINECONE_ENV: ${PINECONE_ENV:-}
@@ -176,6 +178,8 @@ services:
         condition: service_healthy
       chromadb:
         condition: service_started
+      ollama:
+        condition: service_healthy
     labels:
       - "traefik.enable=true"
       - "traefik.http.routers.rag.rule=PathPrefix(`/api/rag`)"
