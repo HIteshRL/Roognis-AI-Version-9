@@ -836,7 +836,35 @@
     }
 
     .document-list .list-item {
-      grid-template-columns: auto 1fr;
+      grid-template-columns: auto 1fr auto;
+    }
+
+    .library-summary {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 10px;
+      margin-bottom: 12px;
+    }
+
+    .library-stat {
+      min-height: 70px;
+      padding: 10px;
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      background: #fbfcfb;
+    }
+
+    .library-stat strong {
+      display: block;
+      margin-top: 7px;
+      font-size: 22px;
+      line-height: 1;
+    }
+
+    .library-stat span {
+      color: var(--muted);
+      font-size: 12px;
+      font-weight: 720;
     }
 
     @media (max-width: 1100px) {
@@ -898,6 +926,7 @@
       .dashboard-grid,
       .chat-input,
       .form-grid,
+      .library-summary,
       .prompt-row {
         grid-template-columns: 1fr;
       }
@@ -914,6 +943,15 @@
 
       .list-item {
         grid-template-columns: auto 1fr;
+      }
+
+      .document-list .list-item {
+        grid-template-columns: auto 1fr;
+      }
+
+      .document-list .list-item .actions {
+        grid-column: 2;
+        justify-content: flex-start;
       }
 
       .list-item .btn,
@@ -1417,12 +1455,19 @@
               <section class="panel">
                 <div class="panel-header">
                   <div class="panel-title">Uploaded documents</div>
-                  <span class="pill" id="documents-count-pill">0</span>
+                  <span class="pill" id="documents-count-pill">0 documents</span>
                 </div>
-                <div class="panel-body document-list" id="teacher-documents">
-                  <div class="quiet-box">
-                    <strong>No documents loaded.</strong>
-                    <p>Sign in as a teacher and refresh after uploading a PDF.</p>
+                <div class="panel-body">
+                  <div class="library-summary" id="document-library-summary">
+                    <div class="library-stat"><span>Ready</span><strong>0</strong></div>
+                    <div class="library-stat"><span>Failed</span><strong>0</strong></div>
+                    <div class="library-stat"><span>Chunks</span><strong>0</strong></div>
+                  </div>
+                  <div class="document-list" id="teacher-documents">
+                    <div class="quiet-box">
+                      <strong>No documents loaded.</strong>
+                      <p>Sign in as a teacher and refresh after uploading a PDF.</p>
+                    </div>
                   </div>
                 </div>
               </section>
@@ -1545,6 +1590,7 @@
       feedbackRating: 5,
       chatVideoRecommendations: [],
       ingestionPollTimer: null,
+      activeIngestionDocumentId: null,
     };
 
     const authScreen = document.querySelector('#auth-screen');
@@ -1682,6 +1728,8 @@
       state.user = user;
       state.sessionId = null;
       state.lastAssistantMessageId = null;
+      state.activeIngestionDocumentId = null;
+      clearTimeout(state.ingestionPollTimer);
 
       const config = roleConfig[role];
       document.querySelector('#user-name').textContent = user.name;
@@ -1765,6 +1813,7 @@
       state.demoMode = false;
       state.sessionId = null;
       state.lastAssistantMessageId = null;
+      state.activeIngestionDocumentId = null;
       clearTimeout(state.ingestionPollTimer);
       document.querySelector('#session-pill').innerHTML = '<span class="dot"></span>Ready';
       appShell.classList.add('hidden');
@@ -1812,14 +1861,17 @@
       const chunksCreated = upload?.chunksCreated ?? progress.chunksCreated ?? '-';
       const chunksEmbedded = upload?.chunksEmbedded ?? progress.chunksEmbedded ?? '-';
       const percent = progress.percent ?? (status === 'ready' ? 100 : 0);
-      pill.className = status === 'failed' ? 'pill red' : status === 'ready' ? 'pill' : 'pill amber';
+      const errorMessage = statusPayload?.errorMessage || upload?.errorMessage || '';
+      const readyCopy = status === 'ready' ? 'Ready for retrieval' : formatStatus(status);
+      pill.className = statusPillClass(status);
       pill.textContent = formatStatus(status);
       result.innerHTML = `
         <div class="status-row"><span>Document</span><strong>${escapeHtml(shortId(documentId))}</strong></div>
-        <div class="status-row"><span>Status</span><strong>${escapeHtml(formatStatus(status))}</strong></div>
+        <div class="status-row"><span>Status</span><strong>${escapeHtml(readyCopy)}</strong></div>
         <div class="status-row"><span>Progress</span><strong>${escapeHtml(String(percent))}%</strong></div>
         <div class="status-row"><span>Entities</span><strong>${escapeHtml(String(entities))}</strong></div>
         <div class="status-row"><span>Chunks</span><strong>${escapeHtml(String(chunksCreated))} / ${escapeHtml(String(chunksEmbedded))}</strong></div>
+        ${errorMessage ? `<div class="status-row"><span>Failure</span><strong>${escapeHtml(errorMessage)}</strong></div>` : ''}
       `;
     }
 
@@ -1833,7 +1885,8 @@
       const countPill = document.querySelector('#documents-count-pill');
       if (!list || state.role !== 'teacher') return;
       if (state.demoMode) {
-        countPill.textContent = '0';
+        countPill.textContent = '0 documents';
+        renderLibrarySummary([]);
         list.innerHTML = '<div class="quiet-box"><strong>Backend sign-in required.</strong><p>Use the teacher account against running services to upload and list PDFs.</p></div>';
         return;
       }
@@ -1843,7 +1896,8 @@
         setConnection(true, 'Backend connected');
         renderTeacherDocuments(payload.documents || []);
       } catch (error) {
-        countPill.textContent = '0';
+        countPill.textContent = '0 documents';
+        renderLibrarySummary([]);
         list.innerHTML = `<div class="quiet-box"><strong>Documents unavailable.</strong><p>${escapeHtml(error.message)}</p></div>`;
         if (!error.status) setConnection(false, 'Backend unavailable');
       }
@@ -1852,7 +1906,8 @@
     function renderTeacherDocuments(documents) {
       const list = document.querySelector('#teacher-documents');
       const countPill = document.querySelector('#documents-count-pill');
-      countPill.textContent = String(documents.length);
+      countPill.textContent = `${documents.length} ${documents.length === 1 ? 'document' : 'documents'}`;
+      renderLibrarySummary(documents);
       if (!documents.length) {
         list.innerHTML = '<div class="quiet-box"><strong>No PDFs indexed yet.</strong><p>Uploaded teacher documents will appear here after ingestion.</p></div>';
         return;
@@ -1865,24 +1920,54 @@
           metadata.chapterNumber ? `Chapter ${metadata.chapterNumber}` : '',
           metadata.chapterName,
         ].filter(Boolean).join(' - ');
+        const entityCount = Number(item.entityCount || 0);
+        const chunkCount = Number(item.chunkCount || 0);
+        const statusCopy = item.status === 'ready' ? 'Ready' : formatStatus(item.status);
         return `
-          <div class="list-item">
+          <div class="list-item" data-document-id="${escapeHtml(item.documentId)}">
             <div class="tile-icon">
               <svg class="icon" viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6"/></svg>
             </div>
             <div>
               <div class="item-title">${escapeHtml(item.filename || 'Uploaded PDF')}</div>
               <div class="item-subtitle">${escapeHtml(subtitle || 'Document metadata unavailable')}</div>
-              <div class="small">${escapeHtml(formatStatus(item.status))} - ${Number(item.entityCount || 0)} entities - ${Number(item.chunkCount || 0)} chunks</div>
+              <div class="small">${entityCount} entities - ${chunkCount} chunks</div>
+            </div>
+            <div class="actions">
+              <span class="${statusPillClass(item.status)}">${escapeHtml(statusCopy)}</span>
+              <button class="btn icon-only" type="button" data-document-status="${escapeHtml(item.documentId)}" aria-label="Load document status">
+                <svg class="icon" viewBox="0 0 24 24"><path d="M3 12h4l3 8 4-16 3 8h4"/></svg>
+              </button>
             </div>
           </div>
         `;
       }).join('');
     }
 
+    function renderLibrarySummary(documents) {
+      const summary = document.querySelector('#document-library-summary');
+      if (!summary) return;
+      const ready = documents.filter(item => item.status === 'ready').length;
+      const failed = documents.filter(item => item.status === 'failed').length;
+      const chunks = documents.reduce((sum, item) => sum + Number(item.chunkCount || 0), 0);
+      const entities = documents.reduce((sum, item) => sum + Number(item.entityCount || 0), 0);
+      summary.innerHTML = `
+        <div class="library-stat"><span>Ready</span><strong>${ready}</strong></div>
+        <div class="library-stat"><span>Failed</span><strong>${failed}</strong></div>
+        <div class="library-stat"><span>Chunks / Entities</span><strong>${chunks} / ${entities}</strong></div>
+      `;
+    }
+
+    function statusPillClass(status) {
+      if (status === 'ready') return 'pill';
+      if (status === 'failed') return 'pill red';
+      return 'pill amber';
+    }
+
     function startIngestionStatusPolling(documentId, uploadPayload) {
       clearTimeout(state.ingestionPollTimer);
       if (!documentId || state.demoMode) return;
+      state.activeIngestionDocumentId = documentId;
 
       const poll = async () => {
         try {
@@ -1890,7 +1975,7 @@
           renderIngestionResult(uploadPayload, statusPayload);
           const percent = statusPayload.progress?.percent ?? 0;
           if (statusPayload.status === 'ready') {
-            setIngestionState('complete', 'Indexed and ready', 100);
+            setIngestionState('complete', 'Ready for retrieval', 100);
             await loadTeacherDocuments();
             return;
           }
@@ -1908,6 +1993,38 @@
       };
 
       poll();
+    }
+
+    async function loadDocumentIngestionStatus(documentId) {
+      if (!documentId || state.demoMode) return;
+      clearTimeout(state.ingestionPollTimer);
+      state.activeIngestionDocumentId = documentId;
+      setIngestionState('processing', 'Loading document status', 15);
+
+      try {
+        const statusPayload = await apiJson(`/api/rag/upload/${encodeURIComponent(documentId)}/status`);
+        const percent = statusPayload.progress?.percent ?? 0;
+        renderIngestionResult({ documentId }, statusPayload);
+
+        if (statusPayload.status === 'ready') {
+          setIngestionState('complete', 'Ready for retrieval', 100);
+          await loadTeacherDocuments();
+          return;
+        }
+        if (statusPayload.status === 'failed') {
+          setIngestionState('failed', statusPayload.errorMessage || 'Ingestion failed', percent);
+          await loadTeacherDocuments();
+          return;
+        }
+
+        setIngestionState('processing', formatStatus(statusPayload.progress?.stage || statusPayload.status), percent);
+        state.ingestionPollTimer = setTimeout(() => {
+          loadDocumentIngestionStatus(documentId);
+        }, 1400);
+      } catch (error) {
+        setIngestionState('failed', error.message, 0);
+        if (!error.status) setConnection(false, 'Backend unavailable');
+      }
     }
 
     document.querySelector('#ingestion-file').addEventListener('change', event => {
@@ -1946,7 +2063,11 @@
         const payload = await apiForm('/api/rag/upload', new FormData(form));
         setConnection(true, 'Backend connected');
         renderIngestionResult(payload, null);
-        setIngestionState(payload.status === 'ready' ? 'complete' : 'processing', formatStatus(payload.status), payload.status === 'ready' ? 100 : 65);
+        setIngestionState(
+          payload.status === 'ready' ? 'complete' : 'processing',
+          payload.status === 'ready' ? 'Ready for retrieval' : formatStatus(payload.status),
+          payload.status === 'ready' ? 100 : 65
+        );
         startIngestionStatusPolling(payload.documentId, payload);
         await loadTeacherDocuments();
       } catch (error) {
@@ -1958,6 +2079,12 @@
     });
 
     document.querySelector('#refresh-documents-btn').addEventListener('click', loadTeacherDocuments);
+
+    document.querySelector('#teacher-documents').addEventListener('click', event => {
+      const button = event.target.closest('[data-document-status]');
+      if (!button) return;
+      loadDocumentIngestionStatus(button.dataset.documentStatus);
+    });
 
     function appendMessage(role, text, meta) {
       const thread = document.querySelector('#chat-thread');
