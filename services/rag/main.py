@@ -38,6 +38,7 @@ from models import (
     IngestionJobStatus,
     RetrievalChunk,
 )
+from retrieval import RetrievalFilters, retrieve_chunks
 
 
 @asynccontextmanager
@@ -56,9 +57,33 @@ def health():
 
 
 @app.get("/api/rag/retrieve")
-def retrieve_stub(q: str = "", schoolId: str = "", subject: str = "", top: int = 5):
-    # Returns empty chunks so AI service doesn't crash before RAG is implemented
-    return []
+def retrieve(
+    q: str = "",
+    schoolId: str = "",
+    subject: str | None = None,
+    grade: Annotated[int | None, Query(ge=1, le=12)] = None,
+    board: str | None = None,
+    curriculum: str | None = None,
+    chapterNumber: Annotated[int | None, Query(ge=1)] = None,
+    top: Annotated[int, Query(ge=1, le=20)] = 5,
+    db: Session = Depends(get_db),
+    settings: Settings = Depends(get_settings),
+):
+    chunks = retrieve_chunks(
+        db,
+        RetrievalFilters(
+            q=q,
+            school_id=schoolId,
+            subject=subject,
+            grade=grade,
+            board=board,
+            curriculum=curriculum,
+            chapter_number=chapterNumber,
+            top=top,
+        ),
+        settings=settings,
+    )
+    return {"chunks": chunks}
 
 
 @app.post("/api/rag/upload")
