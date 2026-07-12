@@ -60,6 +60,8 @@ def test_retrieve_returns_ai_compatible_chunks_without_auth(client, token_factor
             "q": "Why do dentists use mirrors?",
             "schoolId": school_id,
             "subject": "Science",
+            "grade": "8",
+            "chapterNumber": "10",
             "top": "3",
         },
     )
@@ -69,13 +71,41 @@ def test_retrieve_returns_ai_compatible_chunks_without_auth(client, token_factor
     assert isinstance(payload["chunks"], list)
     assert payload["chunks"]
     assert len(payload["chunks"]) <= 3
-    first = payload["chunks"][0]
-    assert isinstance(first["text"], str) and first["text"]
-    assert isinstance(first["source"], str) and first["source"]
-    assert isinstance(first["score"], (int, float))
-    assert "metadata" in first
-    assert first["metadata"]["schoolId"] == school_id
-    assert first["metadata"]["subject"] == "Science"
+    for chunk in payload["chunks"]:
+        assert set(chunk) == {
+            "chunkId",
+            "entityId",
+            "canonicalConceptId",
+            "text",
+            "source",
+            "score",
+            "metadata",
+        }
+        assert isinstance(chunk["chunkId"], str) and chunk["chunkId"]
+        assert isinstance(chunk["entityId"], str) and chunk["entityId"]
+        assert isinstance(chunk["canonicalConceptId"], str) and chunk["canonicalConceptId"]
+        assert isinstance(chunk["text"], str) and chunk["text"]
+        assert isinstance(chunk["source"], str) and chunk["source"]
+        assert isinstance(chunk["score"], (int, float))
+        metadata = chunk["metadata"]
+        assert set(metadata) == {
+            "schoolId",
+            "grade",
+            "subject",
+            "chapterNumber",
+            "chapterName",
+            "entityType",
+            "pageStart",
+            "pageEnd",
+        }
+        assert metadata["schoolId"] == school_id
+        assert metadata["grade"] == 8
+        assert metadata["subject"] == "Science"
+        assert metadata["chapterNumber"] == 10
+        assert metadata["chapterName"] == "Light: Mirrors and Lenses"
+        assert isinstance(metadata["entityType"], str)
+        assert metadata["pageStart"] == 1
+        assert metadata["pageEnd"] == 1
 
 
 def test_retrieve_applies_school_and_subject_filters_before_scoring(client, token_factory):

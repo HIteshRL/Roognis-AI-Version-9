@@ -1,11 +1,22 @@
 from pathlib import Path
 
 import fitz
+import pytest
 from sqlalchemy import select
 
+import main as rag_main
 from database import SessionLocal
 from main import app
-from models import EducationalEntity, EntityRelationship, EntityType, RetrievalChunk
+from models import (
+    Document,
+    DocumentIngestionJob,
+    DocumentStatus,
+    EducationalEntity,
+    EntityRelationship,
+    EntityType,
+    IngestionJobStatus,
+    RetrievalChunk,
+)
 
 
 def upload_pdf(client, token_factory, **overrides):
@@ -149,6 +160,76 @@ def test_upload_rejects_non_pdf_file(client, token_factory):
     assert response.json()["detail"] == "Only PDF uploads are supported."
 
 
+@pytest.mark.parametrize(
+    ("overrides", "detail"),
+    [
+        ({"grade": "13"}, "grade must be between 1 and 12."),
+        ({"chapterNumber": "0"}, "chapterNumber must be positive."),
+        ({"subject": "   "}, "subject is required."),
+    ],
+)
+def test_upload_rejects_invalid_metadata(client, token_factory, overrides, detail):
+    response = upload_pdf(client, token_factory, **overrides)
+
+    assert response.status_code == 400
+    assert response.json()["detail"] == detail
+
+
+def test_upload_rejects_empty_pdf(client, token_factory):
+    client.cookies.set("jwt", token_factory(role="teacher"))
+
+    response = client.post(
+        "/api/rag/upload",
+        data={
+            "board": "CBSE",
+            "curriculum": "NCERT",
+            "grade": "8",
+            "subject": "Science",
+            "book": "Curiosity",
+            "chapterNumber": "10",
+            "chapterName": "Light: Mirrors and Lenses",
+            "language": "English",
+            "edition": "2026-27",
+        },
+        files={"file": ("empty.pdf", b"", "application/pdf")},
+    )
+
+    assert response.status_code == 400
+    assert response.json()["detail"] == "Uploaded PDF is empty."
+
+
+def test_failed_ingestion_persists_failed_status_for_status_endpoint(client, token_factory, monkeypatch):
+    def fail_extraction(*_args, **_kwargs):
+        raise RuntimeError("parser unavailable")
+
+    monkeypatch.setattr(rag_main, "run_entity_extraction", fail_extraction)
+
+    response = upload_pdf(client, token_factory)
+
+    with SessionLocal() as db:
+        document = db.scalar(select(Document).limit(1))
+        job = db.scalar(
+            select(DocumentIngestionJob)
+            .where(DocumentIngestionJob.document_id == document.id)
+            .limit(1)
+        )
+
+    status_response = client.get(f"/api/rag/upload/{document.id}/status")
+    status_payload = status_response.json()
+
+    assert response.status_code == 400
+    assert response.json()["detail"] == "Document ingestion failed."
+    assert document.status == DocumentStatus.FAILED.value
+    assert document.error_message == "Ingestion failed: parser unavailable"
+    assert job.status == IngestionJobStatus.FAILED.value
+    assert job.stage == DocumentStatus.FAILED.value
+    assert job.error_message == document.error_message
+    assert status_response.status_code == 200
+    assert status_payload["status"] == DocumentStatus.FAILED.value
+    assert status_payload["progress"]["stage"] == DocumentStatus.FAILED.value
+    assert status_payload["errorMessage"] == document.error_message
+
+
 def test_upload_extracts_canonical_concepts_and_classified_entities(client, token_factory):
     payload = upload_pdf(client, token_factory).json()
 
@@ -199,5 +280,34 @@ def test_upload_generates_semantic_chunks_with_embedding_metadata(client, token_
     assert all(chunk.metadata_json["subject"] == "Science" for chunk in chunks)
     assert all(chunk.metadata_json["chapterNumber"] == 10 for chunk in chunks)
     assert all(chunk.metadata_json["collection"] == payload["collection"] for chunk in chunks)
+    assert all(chunk.source.startswith("NCERT Science Grade 8") for chunk in chunks)
+    assert all(chunk.token_count and chunk.token_count > 0 for chunk in chunks)
+    assert all(chunk.pedagogical_order is not None for chunk in chunks)
+    assert all(chunk.metadata_json["entityId"] == chunk.entity_id for chunk in chunks)
+    assert all(chunk.metadata_json["canonicalConceptId"] == chunk.canonical_concept_id for chunk in chunks)
     assert any("Dentists use concave mirrors" in chunk.text for chunk in chunks)
     assert any(chunk.chunk_type == "question" for chunk in chunks)
+
+
+def test_document_list_excludes_other_schools_and_rejects_bad_status_filter(client, token_factory):
+    school_a = "22222222-2222-2222-2222-222222222222"
+    school_b = "33333333-3333-3333-3333-333333333333"
+    school_a_doc = upload_pdf(client, token_factory).json()
+    school_b_doc = upload_pdf(
+        client,
+        token_factory,
+        token_overrides={"schoolId": school_b},
+        subject="Science",
+        chapterName="Light in Another School",
+    ).json()
+    client.cookies.set("jwt", token_factory(role="teacher", schoolId=school_a))
+
+    response = client.get("/api/rag/documents?status=ready")
+    bad_filter = client.get("/api/rag/documents?status=unknown")
+
+    document_ids = {document["documentId"] for document in response.json()["documents"]}
+    assert response.status_code == 200
+    assert school_a_doc["documentId"] in document_ids
+    assert school_b_doc["documentId"] not in document_ids
+    assert bad_filter.status_code == 400
+    assert bad_filter.json()["detail"] == "Invalid document status filter."
