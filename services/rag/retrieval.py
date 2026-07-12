@@ -12,7 +12,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from config import Settings, get_settings
-from models import RetrievalChunk
+from models import Document, DocumentStatus, RetrievalChunk
 
 logger = logging.getLogger(__name__)
 
@@ -117,14 +117,16 @@ def retrieve_chunks(
         return []
 
     ranked = []
+    lexical_ranked = lexical_rank_chunks(candidates, query_terms)
     if query_terms and not settings.rag_test_mode:
         try:
-            ranked = vector_rank_chunks(candidates, filters, settings)
+            vector_ranked = vector_rank_chunks(candidates, filters, settings)
+            ranked = hybrid_rank_chunks(vector_ranked, lexical_ranked)
         except Exception as exc:
             logger.warning("Vector retrieval failed; falling back to SQL lexical ranking: %s", exc)
 
     if not ranked:
-        ranked = lexical_rank_chunks(candidates, query_terms)
+        ranked = lexical_ranked
 
     return [
         chunk_response(chunk, score)
@@ -135,9 +137,11 @@ def retrieve_chunks(
 def load_candidate_chunks(db: Session, filters: RetrievalFilters) -> list[RetrievalChunk]:
     statement = (
         select(RetrievalChunk)
+        .join(Document, RetrievalChunk.document_id == Document.id)
         .where(
             RetrievalChunk.school_id == filters.school_id.strip(),
             RetrievalChunk.vector_id.is_not(None),
+            Document.status == DocumentStatus.READY.value,
         )
         .order_by(RetrievalChunk.pedagogical_order.asc().nullslast(), RetrievalChunk.chunk_index.asc())
     )
@@ -211,6 +215,46 @@ def lexical_rank_chunks(
     scored = [(score, chunk) for score, chunk in scored if score > 0 or not query_terms]
     scored.sort(key=rank_sort_key)
     return scored
+
+
+def hybrid_rank_chunks(
+    vector_ranked: list[tuple[float, RetrievalChunk]],
+    lexical_ranked: list[tuple[float, RetrievalChunk]],
+) -> list[tuple[float, RetrievalChunk]]:
+    if not vector_ranked:
+        return lexical_ranked
+
+    lexical_max = max((score for score, _chunk in lexical_ranked), default=0.0) or 1.0
+    combined = {}
+
+    for score, chunk in vector_ranked:
+        combined[chunk.id] = {
+            "chunk": chunk,
+            "vector": max(float(score), 0.0),
+            "lexical": 0.0,
+        }
+
+    for score, chunk in lexical_ranked:
+        entry = combined.setdefault(
+            chunk.id,
+            {
+                "chunk": chunk,
+                "vector": 0.0,
+                "lexical": 0.0,
+            },
+        )
+        entry["lexical"] = max(float(score), 0.0) / lexical_max
+
+    ranked = [
+        (
+            round((entry["vector"] * 0.72) + (entry["lexical"] * 0.28), 6),
+            entry["chunk"],
+        )
+        for entry in combined.values()
+    ]
+    ranked = [(score, chunk) for score, chunk in ranked if score > 0]
+    ranked.sort(key=rank_sort_key)
+    return ranked
 
 
 def group_chunks_by_collection(candidates: list[RetrievalChunk]) -> dict[str, list[RetrievalChunk]]:

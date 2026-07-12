@@ -134,7 +134,7 @@ parent_student  — parent_id, student_id  (composite PK, idempotent linking)
 
 - Docker Desktop or Docker + `docker-compose`
 - Gemini API key for MVP chat and image generation
-- More disk space only if using optional local Ollama/ComfyUI fallback
+- Disk space for the Ollama embedding model used by RAG ingestion; more disk space if using optional ComfyUI image fallback
 
 ### 1. Configure environment
 
@@ -165,7 +165,7 @@ sh scripts/comfyui-model-download.sh
 
 ### 3. Start the full stack
 
-Default Gemini MVP startup should be lightweight because it does not pull local LLM/image models.
+Default Gemini MVP startup starts Ollama for RAG embeddings and ChromaDB for vector storage. ComfyUI remains behind the optional `local-ai` profile.
 
 ```sh
 docker-compose up --build
@@ -211,7 +211,7 @@ Docker Compose sets the runtime defaults for local development. Override these o
 | `RAG_COLLECTION_PREFIX` | `school` | Prefix for per-school/per-subject Chroma collections |
 | `RAG_TEST_MODE` | `false` | Test-only deterministic embedding mode used by pytest |
 
-For local EKE ingestion, make sure the embedding service is available. The default stack starts ChromaDB; embeddings require either the optional local Ollama profile or another reachable Ollama endpoint at `OLLAMA_URL`. The bundled Ollama init script pulls `nomic-embed-text` idempotently:
+For local EKE ingestion, make sure the embedding service is available. The default stack starts ChromaDB and Ollama; the bundled Ollama init script pulls `nomic-embed-text` idempotently before RAG starts:
 
 ```sh
 LLM_PROVIDER=ollama IMAGE_PROVIDER=comfyui docker-compose --profile local-ai up --build

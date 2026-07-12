@@ -8,7 +8,7 @@
     "dev": "nodemon server.js",
     "db:push": "npx prisma db push --schema=prisma/schema.prisma",
     "db:generate": "npx prisma generate --schema=prisma/schema.prisma",
-    "test": "node --test tests/"
+    "test": "node --test tests/*.test.js"
   },
   "dependencies": {
     "@prisma/client": "^5.14.0",

@@ -5,7 +5,7 @@ import retrieval
 from config import get_settings
 from database import SessionLocal
 from main import app
-from models import RetrievalChunk
+from models import Document, DocumentStatus, RetrievalChunk
 
 
 def make_pdf(lines):
@@ -205,7 +205,7 @@ def test_retrieve_uses_vector_index_when_available(client, token_factory, monkey
     assert payload["chunks"][0]["chunkId"] == chunk.id
     assert payload["chunks"][0]["text"] == chunk.text
     assert payload["chunks"][0]["source"] == chunk.source
-    assert payload["chunks"][0]["score"] == 0.8
+    assert payload["chunks"][0]["score"] > 0
     assert calls["query_text"] == "dentist mirror"
     assert calls["embedding"] == [0.1, 0.2]
     assert calls["collection_name"] == chunk.metadata_json["collection"]
@@ -216,6 +216,57 @@ def test_retrieve_uses_vector_index_when_available(client, token_factory, monkey
         ]
     }
     assert calls["rag_test_mode"] is False
+
+
+def test_hybrid_rank_blends_vector_and_lexical_scores(client, token_factory):
+    school_id = "22222222-2222-2222-2222-222222222222"
+    upload_pdf(client, token_factory, school_id=school_id)
+    with SessionLocal() as db:
+        dentist_chunk = db.scalars(
+            select(RetrievalChunk)
+            .where(
+                RetrievalChunk.school_id == school_id,
+                RetrievalChunk.text.ilike("%Dentists%"),
+            )
+            .order_by(RetrievalChunk.chunk_index.asc())
+        ).first()
+        other_chunk = db.scalars(
+            select(RetrievalChunk)
+            .where(
+                RetrievalChunk.school_id == school_id,
+                RetrievalChunk.id != dentist_chunk.id,
+            )
+            .order_by(RetrievalChunk.chunk_index.asc())
+        ).first()
+
+    ranked = retrieval.hybrid_rank_chunks(
+        vector_ranked=[(0.50, other_chunk), (0.45, dentist_chunk)],
+        lexical_ranked=[(3.0, dentist_chunk), (0.1, other_chunk)],
+    )
+
+    assert ranked[0][1].id == dentist_chunk.id
+    assert ranked[0][0] > ranked[1][0]
+
+
+def test_retrieve_ignores_chunks_from_failed_documents(client, token_factory):
+    school_id = "22222222-2222-2222-2222-222222222222"
+    upload = upload_pdf(client, token_factory, school_id=school_id)
+    with SessionLocal() as db:
+        document = db.get(Document, upload["documentId"])
+        document.status = DocumentStatus.FAILED.value
+        db.commit()
+
+    response = client.get(
+        "/api/rag/retrieve",
+        params={
+            "q": "dentist mirror",
+            "schoolId": school_id,
+            "subject": "Science",
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.json() == {"chunks": []}
 
 
 def test_retrieve_returns_empty_chunks_for_missing_school_or_no_matches(client, token_factory):
