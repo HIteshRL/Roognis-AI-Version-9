@@ -1,6 +1,5 @@
 # ─────────────────────────────────────────────────────────────────────────────
-# Roognis AI — RAG Service stub
-# Replace this file with the full implementation.
+# Roognis AI — RAG / Educational Knowledge Engine Service
 # See: roognis-ai-design-complete.pdf → LLD v3 → RAG Service :3003
 #
 # Responsibilities:
@@ -25,7 +24,7 @@ from fastapi import Depends, FastAPI, File, Form, HTTPException, Query, UploadFi
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
-from auth import AuthUser, require_teacher
+from auth import AuthUser, get_current_user, require_teacher
 from chunking import generate_chunks_and_embeddings
 from config import Settings, get_settings
 from database import get_db, init_db
@@ -53,7 +52,7 @@ app.state.settings = get_settings()
 
 @app.get("/health")
 def health():
-    return {"status": "stub", "service": "rag"}
+    return {"status": "ok", "service": "rag"}
 
 
 @app.get("/api/rag/retrieve")
@@ -208,7 +207,7 @@ def list_documents(
     subject: Annotated[str | None, Query()] = None,
     grade: Annotated[int | None, Query(ge=1, le=12)] = None,
     status_filter: Annotated[str | None, Query(alias="status")] = None,
-    user: AuthUser = Depends(require_teacher),
+    user: AuthUser = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
     query = select(Document).where(Document.school_id == user.school_id)
@@ -408,6 +407,8 @@ def document_summary(db: Session, document: Document) -> dict:
         "filename": document.filename,
         "status": document.status,
         "metadata": {
+            "board": document.board,
+            "curriculum": document.curriculum,
             "grade": document.grade,
             "subject": document.subject,
             "chapterNumber": document.chapter_number,
@@ -415,7 +416,6 @@ def document_summary(db: Session, document: Document) -> dict:
         },
         "entityCount": entity_count or 0,
         "chunkCount": chunk_count or 0,
-        "uploadedBy": document.created_by,
         "createdAt": isoformat_or_none(document.created_at),
         "updatedAt": isoformat_or_none(document.updated_at),
     }

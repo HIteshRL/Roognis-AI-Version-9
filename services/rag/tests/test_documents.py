@@ -112,6 +112,8 @@ def test_document_list_is_school_scoped_and_filterable(client, token_factory):
     assert len(documents) == 1
     assert documents[0]["documentId"] == science_doc["documentId"]
     assert documents[0]["metadata"] == {
+        "board": "CBSE",
+        "curriculum": "NCERT",
         "grade": 8,
         "subject": "Science",
         "chapterNumber": 10,

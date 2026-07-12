@@ -1,5 +1,5 @@
-def test_health_returns_rag_stub_status(client):
+def test_health_returns_ok_status(client):
     response = client.get("/health")
 
     assert response.status_code == 200
-    assert response.json() == {"status": "stub", "service": "rag"}
+    assert response.json() == {"status": "ok", "service": "rag"}

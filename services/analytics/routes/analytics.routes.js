@@ -3,18 +3,22 @@ const prisma = require('../lib/prisma');
 const requireAuth = require('../middleware/auth');
 const requireInternalToken = require('../middleware/internal-token');
 const {
+  KNOWN_EVENT_TYPES,
   isValidUuid,
   parseDateOnly,
+  validateEventType,
   validateAttendanceStatus,
   validateScorePair,
   normalizeSubject,
   normalizeOptionalString,
 } = require('../lib/validation');
 const {
+  findStudentUser,
   assertStudentInSchool,
   assertTeacherCanAccessStudent,
   assertParentCanAccessStudent,
   getTeacherAssignedStudentIds,
+  getSchoolStudentIds,
 } = require('../lib/student-access');
 const {
   RECENT_EVENT_LIMIT,
@@ -24,6 +28,9 @@ const {
   buildScoreSummary,
   buildUsageSummary,
   buildSubjectTrends,
+  buildStudentDashboard,
+  buildTeacherDashboard,
+  buildParentDashboard,
 } = require('../lib/dashboard');
 const {
   buildInterventionsForStudents,
@@ -35,14 +42,19 @@ const router = express.Router();
 
 const teacherOnly = [requireAuth, requireAuth.requireRole('teacher')];
 const parentOnly  = [requireAuth, requireAuth.requireRole('parent')];
+const studentOnly = [requireAuth, requireAuth.requireRole('student')];
 
 // POST /api/analytics/event — internal fire-and-forget ingestion
 router.post('/event', requireInternalToken, async (req, res) => {
   try {
     const { type, studentId, schoolId, subject, sessionId, metadata } = req.body || {};
 
-    if (!type || typeof type !== 'string' || !type.trim())
-      return res.status(400).json({ error: 'type is required.' });
+    const normalizedType = validateEventType(type);
+    if (!normalizedType) {
+      return res.status(400).json({
+        error: `type must be one of: ${KNOWN_EVENT_TYPES.join(', ')}.`,
+      });
+    }
 
     if (!isValidUuid(schoolId))
       return res.status(400).json({ error: 'schoolId must be a valid UUID.' });
@@ -55,7 +67,7 @@ router.post('/event', requireInternalToken, async (req, res) => {
 
     await prisma.event.create({
       data: {
-        type: type.trim(),
+        type: normalizedType,
         studentId: studentId || null,
         schoolId,
         subject: typeof subject === 'string' ? subject.trim() || null : null,
@@ -196,6 +208,29 @@ router.post('/score', ...teacherOnly, async (req, res) => {
   }
 });
 
+// GET /api/analytics/student/dashboard
+router.get('/student/dashboard', ...studentOnly, async (req, res) => {
+  try {
+    const since30d = daysAgo(30);
+    const events = await prisma.event.findMany({
+      where: {
+        studentId: req.user.userId,
+        schoolId: req.user.schoolId,
+        createdAt: { gte: since30d },
+      },
+      orderBy: { createdAt: 'desc' },
+      take: 500,
+    });
+
+    return res.status(200).json(buildStudentDashboard(events, {
+      studentId: req.user.userId,
+    }));
+  } catch (err) {
+    console.error('[analytics] student dashboard error:', err);
+    return res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
 // GET /api/analytics/student/:studentId
 router.get('/student/:studentId', requireAuth, async (req, res) => {
   try {
@@ -251,56 +286,23 @@ router.get('/student/:studentId', requireAuth, async (req, res) => {
 router.get('/teacher/dashboard', ...teacherOnly, async (req, res) => {
   try {
     const schoolId = req.user.schoolId;
-    const since7d = daysAgo(7);
-    const assignedStudentIds = await getTeacherAssignedStudentIds(prisma, req.user);
-
-    if (assignedStudentIds.length === 0) {
-      return res.status(200).json({
-        schoolId,
-        studentCount: 0,
-        usageStats: { totalEvents7d: 0, activeStudents7d: 0, byType: {} },
-        attendanceSummary: buildAttendanceSummary([]),
-        scoreSummary: buildScoreSummary([]),
-        recentEvents: [],
-      });
+    const since30d = daysAgo(30);
+    let studentIds = await getTeacherAssignedStudentIds(prisma, req.user);
+    if (studentIds.length === 0) {
+      studentIds = await getSchoolStudentIds(prisma, schoolId);
     }
 
-    const [attendance, scores, events] = await Promise.all([
-      prisma.attendance.findMany({
-        where: { schoolId, studentId: { in: assignedStudentIds } },
-        orderBy: { date: 'desc' },
-        take: RECENT_EVENT_LIMIT,
-      }),
-      prisma.score.findMany({
-        where: { schoolId, studentId: { in: assignedStudentIds } },
-        orderBy: { testDate: 'desc' },
-        take: RECENT_EVENT_LIMIT,
-      }),
-      prisma.event.findMany({
-        where: {
-          schoolId,
-          studentId: { in: assignedStudentIds },
-          createdAt: { gte: since7d },
-        },
-        orderBy: { createdAt: 'desc' },
-        take: RECENT_EVENT_LIMIT,
-      }),
-    ]);
-
-    const usageStats = {
-      totalEvents7d: events.length,
-      activeStudents7d: new Set(events.map(e => e.studentId).filter(Boolean)).size,
-      byType: buildUsageSummary(events).byType,
-    };
-
-    return res.status(200).json({
-      schoolId,
-      studentCount: assignedStudentIds.length,
-      usageStats,
-      attendanceSummary: buildAttendanceSummary(attendance),
-      scoreSummary: buildScoreSummary(scores),
-      recentEvents: events.map(sanitizeEvent),
+    const events = studentIds.length === 0 ? [] : await prisma.event.findMany({
+      where: {
+        schoolId,
+        studentId: { in: studentIds },
+        createdAt: { gte: since30d },
+      },
+      orderBy: { createdAt: 'desc' },
+      take: 500,
     });
+
+    return res.status(200).json(buildTeacherDashboard(events, studentIds, { schoolId }));
   } catch (err) {
     console.error('[analytics] teacher dashboard error:', err);
     return res.status(500).json({ error: 'Internal server error' });
@@ -312,7 +314,10 @@ router.get('/teacher/interventions', ...teacherOnly, async (req, res) => {
   try {
     const schoolId = req.user.schoolId;
     const since7d = daysAgo(7);
-    const assignedStudentIds = await getTeacherAssignedStudentIds(prisma, req.user);
+    let assignedStudentIds = await getTeacherAssignedStudentIds(prisma, req.user);
+    if (assignedStudentIds.length === 0) {
+      assignedStudentIds = await getSchoolStudentIds(prisma, schoolId);
+    }
 
     const events = assignedStudentIds.length === 0 ? [] : await prisma.event.findMany({
       where: {
@@ -349,33 +354,24 @@ router.get('/parent/dashboard', ...parentOnly, async (req, res) => {
     const access = await assertParentCanAccessStudent(req.user, studentId);
     if (access.error) return res.status(access.status).json({ error: access.error });
 
-    const since7d = daysAgo(7);
+    const student = await findStudentUser(prisma, studentId);
+    if (!student || student.role !== 'student')
+      return res.status(404).json({ error: 'Student not found.' });
+    if (student.schoolId !== req.user.schoolId)
+      return res.status(403).json({ error: 'Forbidden.' });
 
-    const [attendance, scores, events] = await Promise.all([
-      prisma.attendance.findMany({
-        where: { studentId, schoolId: req.user.schoolId },
-        orderBy: { date: 'desc' },
-        take: RECENT_EVENT_LIMIT,
-      }),
-      prisma.score.findMany({
-        where: { studentId, schoolId: req.user.schoolId },
-        orderBy: { testDate: 'desc' },
-        take: RECENT_EVENT_LIMIT,
-      }),
-      prisma.event.findMany({
-        where: { studentId, schoolId: req.user.schoolId, createdAt: { gte: since7d } },
-        orderBy: { createdAt: 'desc' },
-        take: RECENT_EVENT_LIMIT,
-      }),
-    ]);
-
-    return res.status(200).json({
-      studentId,
-      usageSummary: buildUsageSummary(events),
-      attendanceSummary: buildAttendanceSummary(attendance),
-      scoreSummary: buildScoreSummary(scores),
-      recentEvents: events.map(sanitizeEvent),
+    const since30d = daysAgo(30);
+    const events = await prisma.event.findMany({
+      where: {
+        studentId,
+        schoolId: req.user.schoolId,
+        createdAt: { gte: since30d },
+      },
+      orderBy: { createdAt: 'desc' },
+      take: 500,
     });
+
+    return res.status(200).json(buildParentDashboard(events, student));
   } catch (err) {
     console.error('[analytics] parent dashboard error:', err);
     return res.status(500).json({ error: 'Internal server error' });
@@ -387,7 +383,10 @@ router.get('/queries/trends', ...teacherOnly, async (req, res) => {
   try {
     const schoolId = req.user.schoolId;
     const since30d = daysAgo(30);
-    const assignedStudentIds = await getTeacherAssignedStudentIds(prisma, req.user);
+    let assignedStudentIds = await getTeacherAssignedStudentIds(prisma, req.user);
+    if (assignedStudentIds.length === 0) {
+      assignedStudentIds = await getSchoolStudentIds(prisma, schoolId);
+    }
 
     const events = assignedStudentIds.length === 0 ? [] : await prisma.event.findMany({
       where: {

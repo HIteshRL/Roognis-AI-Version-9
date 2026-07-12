@@ -2,7 +2,7 @@ const { isValidUuid } = require('./validation');
 
 async function findStudentUser(prisma, studentId) {
   const rows = await prisma.$queryRaw`
-    SELECT id, school_id AS "schoolId", role
+    SELECT id, name, email, school_id AS "schoolId", role
     FROM auth_db.users
     WHERE id = CAST(${studentId} AS uuid)
     LIMIT 1
@@ -64,10 +64,23 @@ async function getTeacherAssignedStudentIds(prisma, teacher) {
   return [...new Set(assignments.map(a => a.studentId))];
 }
 
+async function getSchoolStudentIds(prisma, schoolId) {
+  const rows = await prisma.$queryRaw`
+    SELECT id
+    FROM auth_db.users
+    WHERE school_id = CAST(${schoolId} AS uuid)
+      AND role = 'student'
+    ORDER BY name ASC
+  `;
+
+  return rows.map(row => row.id);
+}
+
 module.exports = {
   findStudentUser,
   assertStudentInSchool,
   assertTeacherCanAccessStudent,
   assertParentCanAccessStudent,
   getTeacherAssignedStudentIds,
+  getSchoolStudentIds,
 };

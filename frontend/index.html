@@ -418,8 +418,33 @@
       gap: 10px;
     }
 
+    .lesson-context-controls {
+      max-width: 440px;
+      align-items: end;
+    }
+
+    .lesson-context-controls .field-group {
+      min-width: 320px;
+      flex: 1 1 320px;
+      max-width: 440px;
+    }
+
+    .lesson-context-controls label {
+      font-size: 11px;
+      font-weight: 820;
+      color: var(--muted);
+      text-transform: uppercase;
+      letter-spacing: 0;
+    }
+
     .grid {
       display: grid;
+      gap: 16px;
+    }
+
+    .split-grid {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
       gap: 16px;
     }
 
@@ -673,6 +698,21 @@
       background: var(--green);
     }
 
+    .chat-empty {
+      border: 1px dashed var(--line-strong);
+      border-radius: var(--radius);
+      color: var(--muted);
+      padding: 18px;
+      max-width: 620px;
+    }
+
+    .chat-empty strong {
+      display: block;
+      color: var(--ink);
+      font-size: 18px;
+      margin-bottom: 6px;
+    }
+
     .message.tutor {
       align-self: flex-start;
       background: #edf3ef;
@@ -702,17 +742,55 @@
     }
 
     .message-body p:last-child,
-    .message-body ul:last-child {
+    .message-body ul:last-child,
+    .message-body ol:last-child {
       margin-bottom: 0;
     }
 
-    .message-body ul {
+    .message-body ul,
+    .message-body ol {
       margin: 8px 0;
       padding-left: 20px;
     }
 
     .message-body li {
       margin: 4px 0;
+    }
+
+    .message-video-results {
+      margin-top: 10px;
+      display: grid;
+      gap: 8px;
+    }
+
+    .message-video-card {
+      display: grid;
+      grid-template-columns: 72px 1fr auto;
+      gap: 10px;
+      align-items: center;
+      padding: 8px;
+      border: 1px solid #dbe6df;
+      border-radius: var(--radius);
+      background: #ffffff;
+    }
+
+    .message-video-card img {
+      width: 72px;
+      height: 48px;
+      border-radius: 6px;
+      object-fit: cover;
+      background: #edf3ef;
+    }
+
+    .message-video-card-title {
+      font-weight: 820;
+      line-height: 1.25;
+    }
+
+    .message-video-card-meta {
+      margin-top: 3px;
+      color: var(--muted);
+      font-size: 12px;
     }
 
     .chat-input {
@@ -923,7 +1001,32 @@
         justify-content: flex-start;
       }
 
+      .lesson-context-controls,
+      .lesson-context-controls .field-group {
+        max-width: none;
+        width: 100%;
+      }
+
+      .message {
+        max-width: 100%;
+      }
+
+      .message-video-card {
+        grid-template-columns: 56px 1fr;
+      }
+
+      .message-video-card img {
+        width: 56px;
+        height: 40px;
+      }
+
+      .message-video-card .btn {
+        grid-column: 1 / -1;
+        justify-content: center;
+      }
+
       .dashboard-grid,
+      .split-grid,
       .chat-input,
       .form-grid,
       .library-summary,
@@ -1003,7 +1106,6 @@
           <div class="small">
             <code>arjun@demo.com</code>, <code>teacher@demo.com</code>, and <code>parent1@demo.com</code> use password <code>demo1234</code>.
           </div>
-          <button class="btn" id="demo-login-btn" type="button" style="margin-top: 12px;">Preview without backend</button>
         </div>
       </main>
     </div>
@@ -1062,24 +1164,24 @@
 
           <div class="grid dashboard-grid">
             <div class="summary-card span-3">
-              <div class="summary-label">Auth Service</div>
-              <div class="summary-value">Ready</div>
-              <div class="summary-help">Role login and JWT cookie are implemented.</div>
+              <div class="summary-label">Learning streak</div>
+              <div class="summary-value" id="student-streak-value">0</div>
+              <div class="summary-help" id="student-streak-help">Days active from tutor, diagram, video, and quiz events.</div>
             </div>
             <div class="summary-card span-3">
-              <div class="summary-label">AI Tutor</div>
-              <div class="summary-value">Ready</div>
-              <div class="summary-help">Student chat sessions and safe streaming responses.</div>
+              <div class="summary-label">Time spent</div>
+              <div class="summary-value" id="student-time-value">0m</div>
+              <div class="summary-help">This week from learning activity events.</div>
             </div>
             <div class="summary-card span-3">
-              <div class="summary-label">Diagrams</div>
-              <div class="summary-value">Ready</div>
-              <div class="summary-help">Image jobs use Gemini or the configured fallback.</div>
+              <div class="summary-label">Lessons done</div>
+              <div class="summary-value" id="student-lessons-value">0</div>
+              <div class="summary-help">Completed lessons and submitted practice this week.</div>
             </div>
             <div class="summary-card span-3">
-              <div class="summary-label">Videos</div>
-              <div class="summary-value">Ready</div>
-              <div class="summary-help">Curated topic list is served by AI service.</div>
+              <div class="summary-label">Practice progress</div>
+              <div class="summary-value" id="student-progress-value">0%</div>
+              <div class="summary-help">Estimated from tutor, diagram, video, and quiz activity.</div>
             </div>
 
             <section class="panel span-7">
@@ -1123,13 +1225,23 @@
 
             <section class="panel span-5">
               <div class="panel-header">
-                <div class="panel-title">Backend boundary</div>
+                <div class="panel-title">Learning analytics</div>
+                <span class="pill" id="student-analytics-pill">Loading</span>
               </div>
-              <div class="panel-body status-list">
-                <div class="status-row"><span>RAG retrieval</span><strong>Ready</strong></div>
-                <div class="status-row"><span>Teacher ingestion</span><strong>Ready</strong></div>
-                <div class="status-row"><span>Analytics dashboard</span><strong>Stub</strong></div>
-                <div class="status-row"><span>Quiz generation</span><strong>Not built</strong></div>
+              <div class="panel-body">
+                <div class="list" id="student-course-progress">
+                  <div class="quiet-box">
+                    <strong>No learning events yet.</strong>
+                    <p>Ask the tutor, generate a diagram, or request a video to start building progress.</p>
+                  </div>
+                </div>
+                <div class="status-list" style="margin-top: 14px;">
+                  <div class="status-row"><span>Tutor practice</span><strong>Tracked</strong></div>
+                  <div class="status-row"><span>Diagram work</span><strong>Tracked</strong></div>
+                  <div class="status-row"><span>Video requests</span><strong>Tracked</strong></div>
+                  <div class="status-row"><span>Practice quiz</span><strong>Waiting</strong></div>
+                  <div class="status-row"><span>Parent summary</span><strong>Shared</strong></div>
+                </div>
               </div>
             </section>
           </div>
@@ -1143,11 +1255,14 @@
               <p class="subtext">Student-only chat uses the AI service, child safety layer, and saved session history.</p>
             </div>
             <div class="actions">
-              <select class="field" id="subject-select" aria-label="Subject">
-                <option>Science</option>
-                <option>Maths</option>
-                <option>English</option>
-              </select>
+              <div class="actions lesson-context-controls" aria-label="Lesson context">
+                <div class="field-group">
+                  <label for="lesson-select">Lesson</label>
+                  <select class="field" id="lesson-select" data-lesson-context>
+                    <option value="">Loading uploaded lessons...</option>
+                  </select>
+                </div>
+              </div>
             </div>
           </div>
 
@@ -1161,10 +1276,9 @@
                 <span class="pill" id="session-pill"><span class="dot"></span>Ready</span>
               </div>
               <div class="chat-thread" id="chat-thread">
-                <div class="message student">Explain photosynthesis for grade 6.</div>
-                <div class="message tutor">
-                  Photosynthesis is how green plants make food. Leaves use sunlight, carbon dioxide from air, and water from roots to make glucose. Oxygen is released back into the air.
-                  <div class="message-meta">Sample tutor answer</div>
+                <div class="chat-empty" id="chat-empty">
+                  <strong>Start from your selected lesson.</strong>
+                  <span>Ask a doubt, request an example, or ask for a video for the current chapter.</span>
                 </div>
               </div>
               <form class="chat-input" id="chat-form">
@@ -1199,12 +1313,14 @@
 
               <section class="panel">
                 <div class="panel-header">
-                  <div class="panel-title">Service contract</div>
+                  <div class="panel-title">Lesson source</div>
+                  <span class="pill" id="lesson-source-pill">Loading</span>
                 </div>
-                <div class="panel-body status-list">
-                  <div class="status-row"><span>Create session</span><strong>POST /api/ai/chat/session</strong></div>
-                  <div class="status-row"><span>Stream answer</span><strong>POST /api/ai/chat</strong></div>
-                  <div class="status-row"><span>Load history</span><strong>GET /api/ai/chat/:id/history</strong></div>
+                <div class="panel-body" id="lesson-source-summary">
+                  <div class="quiet-box">
+                    <strong>Loading uploaded lessons.</strong>
+                    <p>The tutor will use teacher-uploaded chapters when a matching lesson is available.</p>
+                  </div>
                 </div>
               </section>
             </div>
@@ -1287,10 +1403,11 @@
           <div class="page-head">
             <div>
               <p class="eyebrow">Teacher MVP</p>
-              <h1>Prepare textbook knowledge for the tutor.</h1>
-              <p class="subtext">Teacher auth and RAG ingestion are now wired; quiz and class analytics still wait for their service layer.</p>
+              <h1>Class learning overview.</h1>
+              <p class="subtext">Review class learning activity, quiz signals, and the textbook chapters available to the tutor.</p>
             </div>
             <div class="actions">
+              <button class="btn" id="reload-teacher-analytics-btn">Refresh</button>
               <button class="btn primary" data-route="teacher-ingestion">
                 <svg class="icon" viewBox="0 0 24 24"><path d="M12 16V4"/><path d="m7 9 5-5 5 5"/><path d="M4 20h16"/></svg>
                 Upload PDF
@@ -1298,35 +1415,70 @@
             </div>
           </div>
           <div class="grid dashboard-grid">
-            <section class="panel span-6">
+            <div class="summary-card span-3">
+              <div class="summary-label">Class students</div>
+              <div class="summary-value" id="teacher-student-count">0</div>
+              <div class="summary-help">Students in assigned classes or demo school fallback.</div>
+            </div>
+            <div class="summary-card span-3">
+              <div class="summary-label">Active this week</div>
+              <div class="summary-value" id="teacher-active-count">0</div>
+              <div class="summary-help">Students with learning events in 7 days.</div>
+            </div>
+            <div class="summary-card span-3">
+              <div class="summary-label">Latest quiz</div>
+              <div class="summary-value" id="teacher-quiz-status">None</div>
+              <div class="summary-help" id="teacher-quiz-help">No quiz activity yet.</div>
+            </div>
+            <div class="summary-card span-3">
+              <div class="summary-label">Avg quiz score</div>
+              <div class="summary-value" id="teacher-avg-score">-</div>
+              <div class="summary-help">From quiz graded events.</div>
+            </div>
+
+            <section class="panel span-7">
               <div class="panel-header">
-                <div class="panel-title">Ready in backend</div>
+                <div class="panel-title">Learning engagement</div>
+                <span class="pill" id="teacher-analytics-pill">Loading</span>
               </div>
-              <div class="panel-body status-list">
-                <div class="status-row"><span>Teacher auth role</span><strong>Ready</strong></div>
-                <div class="status-row"><span>JWT protected routes</span><strong>Ready</strong></div>
-                <div class="status-row"><span>RAG document upload</span><strong>Ready</strong></div>
-                <div class="status-row"><span>EKE chunk retrieval</span><strong>Ready</strong></div>
+              <div class="panel-body status-list" id="teacher-engagement-list">
+                <div class="status-row"><span>Tutor chat</span><strong>0</strong></div>
+                <div class="status-row"><span>Diagrams</span><strong>0</strong></div>
+                <div class="status-row"><span>Videos</span><strong>0</strong></div>
+                <div class="status-row"><span>Practice quiz</span><strong>0</strong></div>
               </div>
             </section>
-            <section class="panel span-6">
+            <section class="panel span-5">
               <div class="panel-header">
-                <div class="panel-title">Needed after student MVP</div>
+                <div class="panel-title">Teacher follow-ups</div>
               </div>
-              <div class="panel-body status-list">
-                <div class="status-row"><span>Quiz Service</span><strong>Build next</strong></div>
-                <div class="status-row"><span>Class progress APIs</span><strong>Build next</strong></div>
-                <div class="status-row"><span>Teacher dashboard data</span><strong>Analytics stub</strong></div>
-              </div>
-            </section>
-            <section class="panel span-12">
-              <div class="panel-header">
-                <div class="panel-title">MVP rule</div>
-              </div>
-              <div class="panel-body">
+              <div class="panel-body list" id="teacher-actions-list">
                 <div class="quiet-box">
-                  <strong>No fake class performance in the prototype.</strong>
-                  <p>Quiz assignment, student scores, weak areas, and class summaries should appear only after the Quiz and Analytics services are implemented.</p>
+                  <strong>No follow-ups yet.</strong>
+                  <p>Follow-ups appear after students use tutor, videos, diagrams, or quizzes.</p>
+                </div>
+              </div>
+            </section>
+
+            <section class="panel span-6">
+              <div class="panel-header">
+                <div class="panel-title">Weak areas</div>
+              </div>
+              <div class="panel-body list" id="teacher-weak-areas">
+                <div class="quiet-box">
+                  <strong>No weak areas yet.</strong>
+                  <p>Quiz graded events can add topic-level weak areas here.</p>
+                </div>
+              </div>
+            </section>
+            <section class="panel span-6">
+              <div class="panel-header">
+                <div class="panel-title">Knowledge coverage</div>
+              </div>
+              <div class="panel-body status-list" id="teacher-knowledge-list">
+                <div class="quiet-box">
+                  <strong>No indexed chapters yet.</strong>
+                  <p>Upload chapter PDFs so tutor answers can use lesson-backed context.</p>
                 </div>
               </div>
             </section>
@@ -1338,7 +1490,7 @@
             <div>
               <p class="eyebrow">Knowledge Ingestion</p>
               <h1>Upload a textbook chapter PDF.</h1>
-              <p class="subtext">The RAG service stores the document, extracts EKE entities, creates chunks, and indexes embeddings for tutor retrieval.</p>
+              <p class="subtext">Upload teacher-approved chapter PDFs with the exact lesson metadata students will select in tutor chat.</p>
             </div>
             <div class="actions">
               <button class="btn" id="refresh-documents-btn" type="button">
@@ -1386,9 +1538,9 @@
                     <div class="field-group">
                       <label for="ingestion-grade">Grade</label>
                       <select id="ingestion-grade" name="grade" required>
-                        <option value="6">6</option>
+                        <option value="6" selected>6</option>
                         <option value="7">7</option>
-                        <option value="8" selected>8</option>
+                        <option value="8">8</option>
                         <option value="9">9</option>
                         <option value="10">10</option>
                         <option value="11">11</option>
@@ -1405,11 +1557,11 @@
                     </div>
                     <div class="field-group">
                       <label for="ingestion-chapter-number">Chapter</label>
-                      <input class="field" id="ingestion-chapter-number" name="chapterNumber" type="number" min="1" value="10" required>
+                      <input class="field" id="ingestion-chapter-number" name="chapterNumber" type="number" min="1" value="1" required>
                     </div>
                     <div class="field-group">
                       <label for="ingestion-chapter-name">Chapter name</label>
-                      <input class="field" id="ingestion-chapter-name" name="chapterName" value="Light: Mirrors and Lenses" required>
+                      <input class="field" id="ingestion-chapter-name" name="chapterName" value="Plants and nutrition" required>
                     </div>
                     <div class="field-group">
                       <label for="ingestion-language">Language</label>
@@ -1479,11 +1631,35 @@
           <div class="page-head">
             <div>
               <p class="eyebrow">Parent MVP</p>
-              <h1>Parent view waits for progress APIs.</h1>
-              <p class="subtext">Parent login and linked child lookup exist. Weekly progress, reports, and quiz summaries need Analytics and Quiz data first.</p>
+              <h1 id="parent-dashboard-title">Linked child progress.</h1>
+              <p class="subtext">See learning activity from tutor chat, diagrams, videos, and quiz attempts for the selected child.</p>
+            </div>
+            <div class="actions">
+              <button class="btn" id="reload-parent-analytics-btn">Refresh</button>
             </div>
           </div>
           <div class="grid dashboard-grid">
+            <div class="summary-card span-3">
+              <div class="summary-label">Learning streak</div>
+              <div class="summary-value" id="parent-streak-value">0</div>
+              <div class="summary-help">Days active from learning events.</div>
+            </div>
+            <div class="summary-card span-3">
+              <div class="summary-label">Time spent</div>
+              <div class="summary-value" id="parent-time-value">0m</div>
+              <div class="summary-help">This week.</div>
+            </div>
+            <div class="summary-card span-3">
+              <div class="summary-label">Quiz status</div>
+              <div class="summary-value" id="parent-quiz-status">None</div>
+              <div class="summary-help" id="parent-quiz-help">From quiz events when available.</div>
+            </div>
+            <div class="summary-card span-3">
+              <div class="summary-label">Lessons done</div>
+              <div class="summary-value" id="parent-lessons-value">0</div>
+              <div class="summary-help">Completed items this week.</div>
+            </div>
+
             <section class="panel span-5">
               <div class="panel-header">
                 <div class="panel-title">Linked children</div>
@@ -1504,13 +1680,33 @@
             </section>
             <section class="panel span-7">
               <div class="panel-header">
-                <div class="panel-title">Progress data boundary</div>
+                <div class="panel-title">Recent learning activity</div>
+                <span class="pill" id="parent-analytics-pill">Loading</span>
               </div>
-              <div class="panel-body status-list">
-                <div class="status-row"><span>Parent login</span><strong>Ready</strong></div>
-                <div class="status-row"><span>Child lookup</span><strong>Ready</strong></div>
-                <div class="status-row"><span>Learning progress</span><strong>Needs Analytics</strong></div>
-                <div class="status-row"><span>Quiz reports</span><strong>Needs Quiz Service</strong></div>
+              <div class="panel-body list" id="parent-recent-activity">
+                <div class="quiet-box">
+                  <strong>No learning activity yet.</strong>
+                  <p>Activity appears after the linked child uses tutor, diagrams, videos, or quizzes.</p>
+                </div>
+              </div>
+            </section>
+            <section class="panel span-12">
+              <div class="panel-header">
+                <div class="panel-title">Course progress and weak areas</div>
+              </div>
+              <div class="panel-body split-grid">
+                <div class="list" id="parent-course-progress">
+                  <div class="quiet-box">
+                    <strong>No course progress yet.</strong>
+                    <p>Progress is derived from the child’s learning events.</p>
+                  </div>
+                </div>
+                <div class="list" id="parent-weak-areas">
+                  <div class="quiet-box">
+                    <strong>No weak areas yet.</strong>
+                    <p>Quiz graded events can add weak areas later.</p>
+                  </div>
+                </div>
               </div>
             </section>
           </div>
@@ -1544,21 +1740,21 @@
       },
       teacher: {
         label: 'Teacher workspace',
-        contextTitle: 'Knowledge base',
-        contextCopy: 'Upload teacher-approved PDFs for EKE retrieval.',
+        contextTitle: 'Class and knowledge',
+        contextCopy: 'Track class activity and upload teacher-approved lesson PDFs.',
         defaultRoute: 'teacher-mvp',
         nav: [
-          ['teacher-mvp', 'MVP Status', iconPaths.dashboard],
+          ['teacher-mvp', 'Class Overview', iconPaths.dashboard],
           ['teacher-ingestion', 'Ingestion', iconPaths.upload],
         ],
       },
       parent: {
         label: 'Parent workspace',
         contextTitle: 'Linked child',
-        contextCopy: 'Progress screens need Analytics and Quiz APIs.',
+        contextCopy: 'Linked child progress comes from learning activity.',
         defaultRoute: 'parent-mvp',
         nav: [
-          ['parent-mvp', 'MVP Status', iconPaths.user],
+          ['parent-mvp', 'Progress', iconPaths.user],
         ],
       },
     };
@@ -1568,9 +1764,9 @@
       'student-tutor': ['Tutor Chat', 'Student AI chat with safety checks and session history'],
       'student-diagrams': ['Diagrams', 'Safe image job creation and status polling'],
       'student-videos': ['Videos', 'Real-time video recommendations from tutor chat'],
-      'teacher-mvp': ['Teacher MVP Status', 'RAG ingestion is ready; quiz and analytics are later services'],
+      'teacher-mvp': ['Teacher Dashboard', 'Class activity and knowledge coverage'],
       'teacher-ingestion': ['Knowledge Ingestion', 'Upload PDFs into the Educational Knowledge Engine'],
-      'parent-mvp': ['Parent MVP Status', 'Parent progress waits for Analytics and Quiz data'],
+      'parent-mvp': ['Parent Progress', 'Linked child summary from analytics'],
     };
 
     const demoUsers = {
@@ -1589,8 +1785,11 @@
       lastAssistantMessageId: null,
       feedbackRating: 5,
       chatVideoRecommendations: [],
+      availableLessons: [],
+      selectedLessonKey: null,
       ingestionPollTimer: null,
       activeIngestionDocumentId: null,
+      selectedParentStudentId: null,
     };
 
     const authScreen = document.querySelector('#auth-screen');
@@ -1723,12 +1922,14 @@
       });
     }
 
-    function setRole(role, user) {
+    function setRole(role, user, options = {}) {
+      const loadData = options.loadData !== false;
       state.role = role;
       state.user = user;
       state.sessionId = null;
       state.lastAssistantMessageId = null;
       state.activeIngestionDocumentId = null;
+      state.selectedParentStudentId = null;
       clearTimeout(state.ingestionPollTimer);
 
       const config = roleConfig[role];
@@ -1740,8 +1941,16 @@
 
       renderNav(role);
       showRoute(config.defaultRoute);
-      if (role === 'student') loadVideoTopics();
-      if (role === 'teacher') loadTeacherDocuments();
+      if (!loadData) return;
+      if (role === 'student') {
+        loadStudentLessons();
+        loadVideoTopics();
+        loadStudentDashboard();
+      }
+      if (role === 'teacher') {
+        loadTeacherDashboard();
+        loadTeacherDocuments();
+      }
       if (role === 'parent') loadLinkedChildren();
     }
 
@@ -1753,6 +1962,7 @@
       const meta = routeMeta[route] || routeMeta[roleConfig[state.role].defaultRoute];
       document.querySelector('#topbar-title').textContent = meta[0];
       document.querySelector('#topbar-subtitle').textContent = meta[1];
+      if (route === 'student-tutor') loadStudentLessons();
       if (route === 'teacher-ingestion') loadTeacherDocuments();
     }
 
@@ -1791,17 +2001,6 @@
       }
     });
 
-    document.querySelector('#demo-login-btn').addEventListener('click', () => {
-      const email = document.querySelector('#email').value.trim();
-      const user = demoUserFor(email);
-      state.demoMode = true;
-      setConnection(false, 'Demo preview');
-      setRole(user.role, user);
-      document.querySelector('#auth-status').textContent = '';
-      authScreen.classList.add('hidden');
-      appShell.classList.remove('hidden');
-    });
-
     document.querySelector('#logout-btn').addEventListener('click', async () => {
       if (state.apiOnline && !state.demoMode) {
         try {
@@ -1818,7 +2017,7 @@
       document.querySelector('#session-pill').innerHTML = '<span class="dot"></span>Ready';
       appShell.classList.add('hidden');
       authScreen.classList.remove('hidden');
-      setRole('student', demoUsers['arjun@demo.com']);
+      setRole('student', demoUsers['arjun@demo.com'], { loadData: false });
     });
 
     document.addEventListener('click', event => {
@@ -1849,6 +2048,158 @@
       return String(value || 'waiting')
         .replace(/_/g, ' ')
         .replace(/\b\w/g, char => char.toUpperCase());
+    }
+
+    async function loadStudentLessons() {
+      const select = document.querySelector('#lesson-select');
+      if (!select || state.role !== 'student') return;
+
+      if (state.demoMode) {
+        renderStudentLessonOptions([
+          {
+            key: 'demo-science-6-1',
+            title: 'Science - Grade 6 - Chapter 1',
+            subtitle: 'Plants and nutrition',
+            context: {
+              board: 'CBSE',
+              curriculum: 'NCERT',
+              grade: 6,
+              subject: 'Science',
+              chapterNumber: 1,
+              chapterName: 'Plants and nutrition',
+            },
+          },
+        ]);
+        return;
+      }
+
+      try {
+        const payload = await apiJson('/api/rag/documents?status=ready');
+        const lessons = (payload.documents || [])
+          .map(documentToStudentLesson)
+          .filter(Boolean);
+        renderStudentLessonOptions(lessons);
+        setConnection(true, 'Backend connected');
+      } catch (error) {
+        state.availableLessons = [];
+        state.selectedLessonKey = null;
+        renderStudentLessonOptions([], error.message);
+        if (!error.status) setConnection(false, 'Backend unavailable');
+      }
+    }
+
+    function documentToStudentLesson(item) {
+      if (item.status && item.status !== 'ready') return null;
+      const metadata = item.metadata || {};
+      const subject = cleanText(metadata.subject);
+      const grade = Number(metadata.grade || 0) || null;
+      const chapterNumber = Number(metadata.chapterNumber || 0) || null;
+      const chapterName = cleanText(metadata.chapterName);
+      if (!subject) return null;
+
+      const title = [
+        subject,
+        grade ? `Grade ${grade}` : '',
+        chapterNumber ? `Chapter ${chapterNumber}` : '',
+      ].filter(Boolean).join(' - ');
+
+      return {
+        key: item.documentId || `${subject}-${grade || 'any'}-${chapterNumber || 'chapter'}-${chapterName}`,
+        title,
+        subtitle: chapterName || item.filename || 'Uploaded lesson',
+        chunkCount: Number(item.chunkCount || 0),
+        context: {
+          board: cleanText(metadata.board),
+          curriculum: cleanText(metadata.curriculum),
+          grade,
+          subject,
+          chapterNumber,
+          chapterName,
+        },
+      };
+    }
+
+    function cleanText(value) {
+      return typeof value === 'string' ? value.trim() : '';
+    }
+
+    function renderStudentLessonOptions(lessons, errorMessage = '') {
+      const select = document.querySelector('#lesson-select');
+      if (!select) return;
+
+      state.availableLessons = lessons;
+      const previousSelection = state.selectedLessonKey;
+      const nextSelection = lessons.some(lesson => lesson.key === previousSelection)
+        ? previousSelection
+        : lessons[0]?.key || null;
+      state.selectedLessonKey = nextSelection;
+
+      if (errorMessage) {
+        select.disabled = true;
+        select.innerHTML = '<option value="">Lessons unavailable</option>';
+        renderSelectedLessonSummary(errorMessage);
+        return;
+      }
+
+      if (!lessons.length) {
+        select.disabled = true;
+        select.innerHTML = '<option value="">No uploaded lessons yet</option>';
+        renderSelectedLessonSummary();
+        return;
+      }
+
+      select.disabled = false;
+      select.innerHTML = lessons.map(lesson => `
+        <option value="${escapeHtml(lesson.key)}">${escapeHtml(lesson.title)} - ${escapeHtml(lesson.subtitle)}</option>
+      `).join('');
+      select.value = state.selectedLessonKey;
+      renderSelectedLessonSummary();
+    }
+
+    function selectedLesson() {
+      return state.availableLessons.find(lesson => lesson.key === state.selectedLessonKey) || null;
+    }
+
+    function renderSelectedLessonSummary(errorMessage = '') {
+      const pill = document.querySelector('#lesson-source-pill');
+      const summary = document.querySelector('#lesson-source-summary');
+      if (!pill || !summary) return;
+
+      if (errorMessage) {
+        pill.className = 'pill red';
+        pill.textContent = 'Unavailable';
+        summary.innerHTML = `
+          <div class="quiet-box">
+            <strong>Lesson list unavailable.</strong>
+            <p>${escapeHtml(errorMessage)}</p>
+          </div>
+        `;
+        return;
+      }
+
+      const lesson = selectedLesson();
+      if (!lesson) {
+        pill.className = 'pill amber';
+        pill.textContent = 'No lesson';
+        summary.innerHTML = `
+          <div class="quiet-box">
+            <strong>No uploaded lessons yet.</strong>
+            <p>Ask the teacher to upload a chapter PDF before using lesson-backed answers.</p>
+          </div>
+        `;
+        return;
+      }
+
+      const context = lesson.context;
+      pill.className = 'pill';
+      pill.textContent = `${lesson.chunkCount || 0} chunks`;
+      summary.innerHTML = `
+        <div class="status-list">
+          <div class="status-row"><span>Current lesson</span><strong>${escapeHtml(lesson.subtitle)}</strong></div>
+          <div class="status-row"><span>Subject</span><strong>${escapeHtml(context.subject)}</strong></div>
+          <div class="status-row"><span>Class</span><strong>${escapeHtml(context.grade ? `Grade ${context.grade}` : 'Not set')}</strong></div>
+        </div>
+      `;
     }
 
     function renderIngestionResult(upload, statusPayload) {
@@ -1887,6 +2238,7 @@
       if (state.demoMode) {
         countPill.textContent = '0 documents';
         renderLibrarySummary([]);
+        renderTeacherKnowledgeSummary([]);
         list.innerHTML = '<div class="quiet-box"><strong>Backend sign-in required.</strong><p>Use the teacher account against running services to upload and list PDFs.</p></div>';
         return;
       }
@@ -1898,6 +2250,7 @@
       } catch (error) {
         countPill.textContent = '0 documents';
         renderLibrarySummary([]);
+        renderTeacherKnowledgeSummary([]);
         list.innerHTML = `<div class="quiet-box"><strong>Documents unavailable.</strong><p>${escapeHtml(error.message)}</p></div>`;
         if (!error.status) setConnection(false, 'Backend unavailable');
       }
@@ -1908,6 +2261,7 @@
       const countPill = document.querySelector('#documents-count-pill');
       countPill.textContent = `${documents.length} ${documents.length === 1 ? 'document' : 'documents'}`;
       renderLibrarySummary(documents);
+      renderTeacherKnowledgeSummary(documents);
       if (!documents.length) {
         list.innerHTML = '<div class="quiet-box"><strong>No PDFs indexed yet.</strong><p>Uploaded teacher documents will appear here after ingestion.</p></div>';
         return;
@@ -1956,6 +2310,38 @@
         <div class="library-stat"><span>Failed</span><strong>${failed}</strong></div>
         <div class="library-stat"><span>Chunks / Entities</span><strong>${chunks} / ${entities}</strong></div>
       `;
+    }
+
+    function renderTeacherKnowledgeSummary(documents) {
+      const target = document.querySelector('#teacher-knowledge-list');
+      if (!target) return;
+      const readyDocs = documents.filter(item => item.status === 'ready');
+      if (!readyDocs.length) {
+        target.innerHTML = `
+          <div class="quiet-box">
+            <strong>No indexed chapters yet.</strong>
+            <p>Upload chapter PDFs so tutor answers can use lesson-backed context.</p>
+          </div>
+        `;
+        return;
+      }
+
+      target.innerHTML = readyDocs.slice(0, 4).map(item => {
+        const metadata = item.metadata || {};
+        const title = [
+          metadata.subject || 'Subject',
+          metadata.grade ? `Grade ${metadata.grade}` : '',
+          metadata.chapterNumber ? `Chapter ${metadata.chapterNumber}` : '',
+        ].filter(Boolean).join(' - ');
+        const detail = metadata.chapterName || item.filename || 'Indexed chapter';
+        const chunks = Number(item.chunkCount || 0);
+        return `
+          <div class="status-row">
+            <span>${escapeHtml(title)}<br><small>${escapeHtml(detail)}</small></span>
+            <strong>${chunks} chunks</strong>
+          </div>
+        `;
+      }).join('');
     }
 
     function statusPillClass(status) {
@@ -2088,6 +2474,7 @@
 
     function appendMessage(role, text, meta) {
       const thread = document.querySelector('#chat-thread');
+      clearChatEmptyState();
       const message = document.createElement('div');
       message.className = `message ${role}`;
       const body = document.createElement('div');
@@ -2105,10 +2492,31 @@
       return message;
     }
 
+    function clearChatEmptyState() {
+      const empty = document.querySelector('#chat-empty');
+      if (empty) empty.remove();
+    }
+
+    function renderEmptyChatState() {
+      const thread = document.querySelector('#chat-thread');
+      thread.innerHTML = `
+        <div class="chat-empty" id="chat-empty">
+          <strong>Start from your selected lesson.</strong>
+          <span>Ask a doubt, request an example, or ask for a video for the current chapter.</span>
+        </div>
+      `;
+    }
+
+    function scrollChatToBottom() {
+      const thread = document.querySelector('#chat-thread');
+      if (thread) thread.scrollTop = thread.scrollHeight;
+    }
+
     function setMessageText(message, text) {
       const body = message.querySelector('.message-body');
       if (!body) return;
       body.textContent = text;
+      scrollChatToBottom();
     }
 
     function setMessageRichText(message, text) {
@@ -2117,35 +2525,43 @@
       body.innerHTML = '';
 
       renderReadableTutorText(body, text);
+      scrollChatToBottom();
     }
 
     function renderReadableTutorText(container, text) {
       const readable = String(text || '')
         .replace(/\r\n/g, '\n')
-        .replace(/\s+\*\s+(?=[A-Z0-9])/g, '\n* ');
+        .replace(/([.:?])\s+\*\s+/g, '$1\n* ')
+        .replace(/\s+(\d+[.)])\s+/g, '\n$1 ');
       const lines = readable.split('\n');
       let list = null;
+      let listType = null;
 
       lines.forEach(line => {
         const trimmed = line.trim();
         if (!trimmed) {
           list = null;
+          listType = null;
           return;
         }
 
         const bullet = trimmed.match(/^[-*]\s+(.*)$/);
-        if (bullet) {
-          if (!list) {
-            list = document.createElement('ul');
+        const numbered = trimmed.match(/^\d+[.)]\s+(.*)$/);
+        if (bullet || numbered) {
+          const desiredListType = numbered ? 'ol' : 'ul';
+          if (!list || listType !== desiredListType) {
+            list = document.createElement(desiredListType);
             container.appendChild(list);
+            listType = desiredListType;
           }
           const item = document.createElement('li');
-          appendInlineTutorText(item, bullet[1]);
+          appendInlineTutorText(item, bullet ? bullet[1] : numbered[1]);
           list.appendChild(item);
           return;
         }
 
         list = null;
+        listType = null;
         const paragraph = document.createElement('p');
         appendInlineTutorText(paragraph, trimmed.replace(/^#{1,6}\s+/, ''));
         container.appendChild(paragraph);
@@ -2171,7 +2587,7 @@
           parent.appendChild(strong);
           return;
         }
-        parent.appendChild(document.createTextNode(part));
+        parent.appendChild(document.createTextNode(part.replace(/\*/g, '')));
       });
     }
 
@@ -2197,14 +2613,30 @@
 
     async function ensureSession() {
       if (state.sessionId) return state.sessionId;
-      const subject = document.querySelector('#subject-select').value;
+      const lessonContext = readLessonContext();
       const payload = await apiJson('/api/ai/chat/session', {
         method: 'POST',
-        body: { subject },
+        body: lessonContext,
       });
       state.sessionId = payload.sessionId;
-      document.querySelector('#session-pill').innerHTML = '<span class="dot"></span>Session saved';
+      document.querySelector('#session-pill').innerHTML = '<span class="dot"></span>Session active';
       return state.sessionId;
+    }
+
+    function readLessonContext() {
+      const lesson = selectedLesson();
+      if (!lesson) return { subject: 'General' };
+      return lesson.context;
+    }
+
+    function resetTutorSessionForLessonChange() {
+      const lessonSelect = document.querySelector('#lesson-select');
+      if (lessonSelect) state.selectedLessonKey = lessonSelect.value || null;
+      state.sessionId = null;
+      state.lastAssistantMessageId = null;
+      renderSelectedLessonSummary();
+      renderEmptyChatState();
+      document.querySelector('#session-pill').innerHTML = '<span class="dot"></span>Ready';
     }
 
     function parseSseChunk(chunk, onToken, onVideoRecommendation, onAnswerContext, onStatus) {
@@ -2266,12 +2698,15 @@
         for (const chunk of chunks) {
           streamError = parseSseChunk(chunk, text => {
             answer += text;
-            setMessageText(targetNode, answer);
-          }, handleChatVideoRecommendation, context => {
+            setMessageRichText(targetNode, answer);
+          }, recommendation => {
+            handleChatVideoRecommendation(recommendation);
+            appendVideoCardsToMessage(targetNode, recommendation);
+          }, context => {
             const ragChunkCount = Number(context.ragChunkCount || 0);
             const label = context.source === 'rag' && ragChunkCount > 0
-              ? `RAG-backed answer - ${ragChunkCount} source chunks`
-              : 'Gemini general answer - RAG not ready';
+              ? `From your lesson - ${ragChunkCount} source chunks`
+              : 'General tutor answer - no matching lesson source found';
             setMessageMeta(targetNode, label);
           }, status => {
             if (status.status === 'refused') {
@@ -2288,6 +2723,8 @@
         setMessageRichText(targetNode, answer);
       }
       await refreshLatestAssistantMessageId();
+      document.querySelector('#session-pill').innerHTML = '<span class="dot"></span>Response saved';
+      loadStudentDashboard();
     }
 
     async function refreshLatestAssistantMessageId() {
@@ -2337,6 +2774,10 @@
       }
     });
 
+    document.querySelectorAll('[data-lesson-context]').forEach(control => {
+      control.addEventListener('change', resetTutorSessionForLessonChange);
+    });
+
     document.querySelector('#rating-buttons').addEventListener('click', event => {
       const button = event.target.closest('[data-rating]');
       if (!button) return;
@@ -2372,6 +2813,7 @@
           },
         });
         status.textContent = 'Feedback saved.';
+        loadStudentDashboard();
       } catch (error) {
         status.textContent = error.message;
       } finally {
@@ -2434,6 +2876,7 @@
         image.classList.remove('hidden');
         placeholder.classList.add('hidden');
         status.textContent = 'Done';
+        loadStudentDashboard();
       } catch (error) {
         status.textContent = 'Failed';
         note.textContent = formatImageError(error.message);
@@ -2478,6 +2921,36 @@
       ].slice(0, 5);
 
       renderChatVideoRecommendations();
+    }
+
+    function appendVideoCardsToMessage(message, recommendation) {
+      if (!message || !Array.isArray(recommendation?.videos) || !recommendation.videos.length) return;
+
+      let holder = message.querySelector('.message-video-results');
+      if (!holder) {
+        holder = document.createElement('div');
+        holder.className = 'message-video-results';
+        message.appendChild(holder);
+      }
+
+      holder.innerHTML = recommendation.videos.slice(0, 2).map(video => `
+        <div class="message-video-card">
+          ${video.thumbnailUrl ? `<img src="${safeUrl(video.thumbnailUrl)}" alt="">` : '<div class="tile-icon blue"><svg class="icon" viewBox="0 0 24 24"><rect x="3" y="5" width="18" height="14" rx="2"/><path d="m10 9 5 3-5 3z"/></svg></div>'}
+          <div>
+            <div class="message-video-card-title">${escapeHtml(video.title || 'Recommended lesson video')}</div>
+            <div class="message-video-card-meta">${escapeHtml(video.source || 'Education video')}${video.durationSeconds ? ` - ${formatVideoDuration(video.durationSeconds)}` : ''}</div>
+          </div>
+          <a class="btn" href="${safeUrl(video.url)}" target="_blank" rel="noreferrer">Open</a>
+        </div>
+      `).join('');
+    }
+
+    function formatVideoDuration(seconds) {
+      const total = Number(seconds || 0);
+      if (!total) return '';
+      const minutes = Math.floor(total / 60);
+      const remainder = total % 60;
+      return `${minutes}:${String(remainder).padStart(2, '0')}`;
     }
 
     function renderChatVideoRecommendations() {
@@ -2593,11 +3066,201 @@
 
     document.querySelector('#reload-videos-btn').addEventListener('click', loadVideoTopics);
 
+    function setText(selector, value) {
+      const node = document.querySelector(selector);
+      if (node) node.textContent = value;
+    }
+
+    function formatDuration(seconds) {
+      const total = Math.max(Number(seconds || 0), 0);
+      if (total < 60) return `${Math.round(total)}s`;
+      const minutes = Math.round(total / 60);
+      if (minutes < 60) return `${minutes}m`;
+      const hours = Math.floor(minutes / 60);
+      const remaining = minutes % 60;
+      return remaining ? `${hours}h ${remaining}m` : `${hours}h`;
+    }
+
+    function formatPercent(value) {
+      return Number.isFinite(Number(value)) ? `${Math.round(Number(value))}%` : '-';
+    }
+
+    function renderProgressList(selector, courses) {
+      const container = document.querySelector(selector);
+      if (!container) return;
+      if (!courses?.length) {
+        container.innerHTML = '<div class="quiet-box"><strong>No course progress yet.</strong><p>Progress appears after tutor, diagram, video, or quiz activity.</p></div>';
+        return;
+      }
+
+      container.innerHTML = courses.slice(0, 4).map(course => `
+        <div class="list-item">
+          <div class="tile-icon">
+            <svg class="icon" viewBox="0 0 24 24"><path d="M4 19h16M5 17l4-8 4 5 3-4 3 7"/></svg>
+          </div>
+          <div>
+            <div class="item-title">${escapeHtml(course.subject)}</div>
+            <div class="item-subtitle">${escapeHtml(course.nextAction || 'Continue learning')} · ${Number(course.activityCount || 0)} activities</div>
+          </div>
+          <span class="pill">${formatPercent(course.progressPercent)}</span>
+        </div>
+      `).join('');
+    }
+
+    function renderWeakAreas(selector, areas) {
+      const container = document.querySelector(selector);
+      if (!container) return;
+      if (!areas?.length) {
+        container.innerHTML = '<div class="quiet-box"><strong>No weak areas yet.</strong><p>Quiz graded events can add weak areas here.</p></div>';
+        return;
+      }
+
+      container.innerHTML = areas.map(area => `
+        <div class="list-item">
+          <div class="tile-icon amber">
+            <svg class="icon" viewBox="0 0 24 24"><path d="M12 9v4"/><path d="M12 17h.01"/><path d="m10.3 3.9-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.7-3.1l-8-14a2 2 0 0 0-3.4 0z"/></svg>
+          </div>
+          <div>
+            <div class="item-title">${escapeHtml(area.label)}</div>
+            <div class="item-subtitle">${Number(area.count || 0)} signal${Number(area.count || 0) === 1 ? '' : 's'}</div>
+          </div>
+        </div>
+      `).join('');
+    }
+
+    function renderRecentActivity(selector, events) {
+      const container = document.querySelector(selector);
+      if (!container) return;
+      if (!events?.length) {
+        container.innerHTML = '<div class="quiet-box"><strong>No learning activity yet.</strong><p>Activity appears after tutor, diagrams, videos, or quizzes.</p></div>';
+        return;
+      }
+
+      container.innerHTML = events.map(event => `
+        <div class="list-item">
+          <div class="tile-icon blue">
+            <svg class="icon" viewBox="0 0 24 24"><path d="M21 15a4 4 0 0 1-4 4H8l-5 3V7a4 4 0 0 1 4-4h10a4 4 0 0 1 4 4z"/></svg>
+          </div>
+          <div>
+            <div class="item-title">${escapeHtml(event.title || event.type)}</div>
+            <div class="item-subtitle">${escapeHtml(event.subject || 'General')} · ${escapeHtml(String(event.type || '').replaceAll('_', ' '))}</div>
+          </div>
+        </div>
+      `).join('');
+    }
+
+    async function loadStudentDashboard() {
+      if (state.demoMode) {
+        setText('#student-analytics-pill', 'Demo');
+        return;
+      }
+
+      try {
+        const dashboard = await apiJson('/api/analytics/student/dashboard');
+        setText('#student-streak-value', String(dashboard.learningStreakDays || 0));
+        setText('#student-time-value', formatDuration(dashboard.timeSpentSecondsThisWeek));
+        setText('#student-lessons-value', String(dashboard.lessonsCompletedThisWeek || 0));
+        setText('#student-progress-value', formatPercent(dashboard.practiceProgressPercent));
+        setText('#student-analytics-pill', 'Backend');
+        renderProgressList('#student-course-progress', dashboard.courseProgress || []);
+      } catch (error) {
+        setText('#student-analytics-pill', 'Unavailable');
+      }
+    }
+
+    function renderTeacherActions(actions) {
+      const container = document.querySelector('#teacher-actions-list');
+      if (!container) return;
+      if (!actions?.length) {
+        container.innerHTML = '<div class="quiet-box"><strong>No follow-ups yet.</strong><p>Follow-ups appear after students use tutor, videos, diagrams, or quizzes.</p></div>';
+        return;
+      }
+
+      container.innerHTML = actions.map(action => `
+        <div class="list-item">
+          <div class="tile-icon amber">
+            <svg class="icon" viewBox="0 0 24 24"><path d="M12 8v5"/><path d="M12 17h.01"/><circle cx="12" cy="12" r="10"/></svg>
+          </div>
+          <div>
+            <div class="item-title">${escapeHtml(action.title)}</div>
+            <div class="item-subtitle">${escapeHtml(action.detail)}</div>
+          </div>
+        </div>
+      `).join('');
+    }
+
+    async function loadTeacherDashboard() {
+      if (state.demoMode) {
+        setText('#teacher-analytics-pill', 'Demo');
+        return;
+      }
+
+      try {
+        const dashboard = await apiJson('/api/analytics/teacher/dashboard');
+        const quiz = dashboard.activeQuiz || {};
+        setText('#teacher-student-count', String(dashboard.studentCount || 0));
+        setText('#teacher-active-count', String(dashboard.usageStats?.activeStudents7d || 0));
+        setText('#teacher-quiz-status', quiz.status === 'active' ? String(quiz.submittedCount || 0) : 'None');
+        setText('#teacher-quiz-help', quiz.status === 'active'
+          ? `${quiz.title || 'Latest quiz'} · ${quiz.pendingCount || 0} pending`
+          : 'No quiz activity yet. Assigned quizzes and submissions will appear here.');
+        setText('#teacher-avg-score', quiz.averageScorePercent === null || quiz.averageScorePercent === undefined ? '-' : formatPercent(quiz.averageScorePercent));
+        setText('#teacher-analytics-pill', 'Backend');
+
+        const engagement = dashboard.lessonEngagement || [];
+        document.querySelector('#teacher-engagement-list').innerHTML = engagement.map(item => `
+          <div class="status-row"><span>${escapeHtml(item.label)}</span><strong>${Number(item.count || 0)}</strong></div>
+        `).join('');
+        renderWeakAreas('#teacher-weak-areas', dashboard.weakAreas || []);
+        renderTeacherActions(dashboard.nextActions || []);
+      } catch (error) {
+        setText('#teacher-analytics-pill', 'Unavailable');
+      }
+    }
+
+    async function loadParentDashboard(studentId = state.selectedParentStudentId) {
+      if (state.demoMode || !studentId) {
+        setText('#parent-analytics-pill', state.demoMode ? 'Demo' : 'No child');
+        setText('#parent-dashboard-title', 'Linked child progress.');
+        return;
+      }
+
+      try {
+        const dashboard = await apiJson(`/api/analytics/parent/dashboard?studentId=${encodeURIComponent(studentId)}`);
+        setText('#parent-dashboard-title', dashboard.studentName ? `${dashboard.studentName}'s progress.` : 'Linked child progress.');
+        setText('#parent-streak-value', String(dashboard.learningStreakDays || 0));
+        setText('#parent-time-value', formatDuration(dashboard.timeSpentSecondsThisWeek));
+        setText('#parent-quiz-status', dashboard.assignedQuizStatus || 'None');
+        setText('#parent-quiz-help', dashboard.latestQuizScorePercent === null || dashboard.latestQuizScorePercent === undefined
+          ? 'From quiz events when available.'
+          : `Latest score ${formatPercent(dashboard.latestQuizScorePercent)}`);
+        setText('#parent-lessons-value', String(dashboard.lessonsCompletedThisWeek || 0));
+        setText('#parent-analytics-pill', 'Backend');
+        renderRecentActivity('#parent-recent-activity', dashboard.recentActivity || []);
+        renderProgressList('#parent-course-progress', dashboard.courseProgress || []);
+        renderWeakAreas('#parent-weak-areas', dashboard.weakAreas || []);
+      } catch (error) {
+        setText('#parent-dashboard-title', 'Linked child progress.');
+        setText('#parent-analytics-pill', 'Unavailable');
+      }
+    }
+
     async function loadLinkedChildren() {
       const container = document.querySelector('#linked-children');
-      if (state.demoMode || !state.user.userId) return;
+      if (state.demoMode) {
+        setText('#parent-analytics-pill', 'Demo');
+        return;
+      }
+      if (!state.user.userId) return;
       try {
         const children = await apiJson(`/api/auth/parent/${state.user.userId}/students`);
+        state.selectedParentStudentId = children[0]?.studentId || null;
+        if (!children.length) {
+          container.innerHTML = '<div class="quiet-box"><strong>No linked children.</strong><p>Ask the school admin to link a student to this parent account.</p></div>';
+          setText('#parent-analytics-pill', 'No child');
+          setText('#parent-dashboard-title', 'Linked child progress.');
+          return;
+        }
         container.innerHTML = children.map(child => `
           <div class="list-item">
             <div class="tile-icon">
@@ -2607,13 +3270,26 @@
               <div class="item-title">${escapeHtml(child.name)}</div>
               <div class="item-subtitle">${escapeHtml(child.email || 'Linked student')}</div>
             </div>
-            <span class="pill">Linked</span>
+            <button class="btn" data-parent-student="${escapeHtml(child.studentId)}">View</button>
           </div>
         `).join('');
+        await loadParentDashboard(state.selectedParentStudentId);
       } catch (error) {
         container.innerHTML = '<div class="quiet-box"><strong>Linked children unavailable.</strong><p>The auth service could not load linked children for this parent.</p></div>';
+        setText('#parent-analytics-pill', 'Unavailable');
       }
     }
+
+    document.querySelector('#linked-children').addEventListener('click', event => {
+      const button = event.target.closest('[data-parent-student]');
+      if (!button) return;
+      state.selectedParentStudentId = button.dataset.parentStudent;
+      loadParentDashboard(state.selectedParentStudentId);
+    });
+
+    document.querySelector('#reload-teacher-analytics-btn').addEventListener('click', loadTeacherDashboard);
+    document.querySelector('#reload-parent-analytics-btn').addEventListener('click', () => loadParentDashboard());
+
 
     async function restoreExistingSession() {
       const authStatus = document.querySelector('#auth-status');
@@ -2641,7 +3317,7 @@
           return;
         }
         setConnection(false, 'Backend unavailable');
-        authStatus.textContent = 'Backend is not reachable yet. Start Docker services, or use preview mode.';
+        authStatus.textContent = 'Backend is not reachable yet. Start Docker services and sign in with a demo account.';
       }
     }
 

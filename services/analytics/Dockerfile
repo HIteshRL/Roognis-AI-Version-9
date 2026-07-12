@@ -7,7 +7,7 @@ RUN apk add --no-cache curl openssl
 COPY . .
 
 RUN [ -f package.json ] && npm ci || true
-RUN [ -f prisma/schema.prisma ] && npx prisma generate --schema=prisma/schema.prisma || true
+RUN [ -f prisma/schema.prisma ] && NODE_TLS_REJECT_UNAUTHORIZED=0 npx prisma generate --schema=prisma/schema.prisma || true
 
 EXPOSE 3004
 
