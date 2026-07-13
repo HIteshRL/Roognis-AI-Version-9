@@ -13,6 +13,7 @@ const KNOWN_EVENT_TYPES = [
   'video_recommended',
   'video_opened',
   'video_completed',
+  'study_time_tracked',
   'lesson_started',
   'lesson_completed',
   'quiz_draft_created',

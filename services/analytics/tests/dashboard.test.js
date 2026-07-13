@@ -36,7 +36,8 @@ describe('dashboard builders', () => {
 
     assert.equal(dashboard.studentId, 'student-1');
     assert.equal(dashboard.learningStreakDays, 1);
-    assert.ok(dashboard.timeSpentSecondsThisWeek > 0);
+    assert.equal(dashboard.timeSpentSecondsThisWeek, 0);
+    assert.equal(dashboard.practiceProgressPercent, 60);
     assert.equal(dashboard.lessonsCompletedThisWeek, 1);
     assert.equal(dashboard.weakAreas[0].label, 'Photosynthesis equation');
   });
@@ -54,6 +55,15 @@ describe('dashboard builders', () => {
     assert.equal(dashboard.activeQuiz.title, 'Plants quiz');
     assert.equal(dashboard.activeQuiz.averageScorePercent, 80);
     assert.ok(dashboard.lessonEngagement.find(item => item.key === 'videos').count > 0);
+  });
+
+  it('counts only explicit active seconds for study time', () => {
+    const dashboard = buildStudentDashboard([
+      event({ type: 'chat_message', createdAt: now }),
+      event({ type: 'study_time_tracked', createdAt: now, metadata: { activeSeconds: 45 } }),
+    ], { studentId: 'student-1', now });
+
+    assert.equal(dashboard.timeSpentSecondsThisWeek, 45);
   });
 
   it('builds parent summary for a linked child', () => {

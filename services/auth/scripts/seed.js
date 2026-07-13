@@ -4,6 +4,7 @@ const bcrypt = require('bcryptjs');
 const prisma = new PrismaClient();
 
 const DEMO_SCHOOL_ID = process.env.DEMO_SCHOOL_ID;
+const SEED_DEMO_USERS = process.env.SEED_DEMO_USERS === 'true';
 
 const DEMO_USERS = [
   { name: 'Demo Teacher',  email: 'teacher@demo.com', password: 'demo1234', role: 'teacher' },
@@ -15,6 +16,11 @@ const DEMO_USERS = [
 ];
 
 async function main() {
+  if (!SEED_DEMO_USERS) {
+    console.log('[seed] Demo user seeding disabled.');
+    return;
+  }
+
   const count = await prisma.user.count();
   if (count > 0) {
     console.log('[seed] Database already seeded — skipping.');

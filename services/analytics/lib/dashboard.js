@@ -16,25 +16,13 @@ const LEARNING_EVENT_TYPES = new Set([
   'video_recommended',
   'video_opened',
   'video_completed',
+  'study_time_tracked',
   'lesson_started',
   'lesson_completed',
   'quiz_opened',
   'quiz_submitted',
   'quiz_graded',
 ]);
-
-const DEFAULT_ACTIVE_SECONDS = {
-  chat_message: 120,
-  feedback_submitted: 15,
-  image_generated: 60,
-  video_recommended: 45,
-  video_opened: 300,
-  video_completed: 600,
-  lesson_started: 60,
-  lesson_completed: 600,
-  quiz_opened: 120,
-  quiz_submitted: 300,
-};
 
 function daysAgo(n) {
   const d = new Date();
@@ -224,7 +212,7 @@ function eventActiveSeconds(event) {
   ]);
   if (explicit !== null) return Math.min(explicit, 7200);
 
-  return DEFAULT_ACTIVE_SECONDS[event.type] || 0;
+  return 0;
 }
 
 function isLearningActivity(event) {
@@ -398,6 +386,16 @@ function buildCourseProgress(events) {
     .sort((a, b) => (b.lastActiveAt || 0) - (a.lastActiveAt || 0));
 }
 
+function buildPracticeProgressPercent(events) {
+  const scores = events
+    .filter(event => event.type === 'quiz_graded')
+    .map(event => scorePercentFromMetadata(event.metadata))
+    .filter(value => value !== null);
+
+  if (!scores.length) return 0;
+  return Math.round(scores.reduce((sum, score) => sum + score, 0) / scores.length);
+}
+
 function buildRecentActivity(events, limit = 6) {
   return events
     .filter(isLearningActivity)
@@ -429,7 +427,8 @@ function buildStudentDashboard(events, options = {}) {
     learningStreakDays: buildLearningStreak(events, now),
     timeSpentSecondsThisWeek: sumActiveSeconds(events, now, 7),
     lessonsCompletedThisWeek: completedThisWeek,
-    practiceProgressPercent: averageProgress,
+    learningProgressPercent: averageProgress,
+    practiceProgressPercent: buildPracticeProgressPercent(recentEvents),
     courseProgress,
     recentActivity: buildRecentActivity(events),
     weakAreas: buildWeakAreas(events),

@@ -89,6 +89,60 @@ app.post('/api/ai/chat/session', ...studentOnly, asyncHandler(async (req, res) =
   res.status(201).json({ sessionId: session.id, lessonContext: session });
 }));
 
+app.get('/api/ai/chat/sessions', ...studentOnly, asyncHandler(async (req, res) => {
+  const sessions = await prisma.chatSession.findMany({
+    where: { studentId: req.user.userId },
+    orderBy: { createdAt: 'desc' },
+    take: 50,
+    select: {
+      id: true,
+      subject: true,
+      board: true,
+      curriculum: true,
+      grade: true,
+      chapterNumber: true,
+      chapterName: true,
+      createdAt: true,
+      _count: { select: { messages: true } },
+      messages: {
+        orderBy: { createdAt: 'desc' },
+        take: 1,
+        select: {
+          role: true,
+          content: true,
+          createdAt: true,
+        },
+      },
+    },
+  });
+
+  const ordered = sessions
+    .map(session => {
+      const lastMessage = session.messages[0] || null;
+      return {
+        sessionId: session.id,
+        subject: session.subject,
+        board: session.board,
+        curriculum: session.curriculum,
+        grade: session.grade,
+        chapterNumber: session.chapterNumber,
+        chapterName: session.chapterName,
+        createdAt: session.createdAt,
+        latestActivityAt: lastMessage?.createdAt || session.createdAt,
+        messageCount: session._count.messages,
+        lastMessage: lastMessage ? {
+          role: lastMessage.role,
+          content: lastMessage.content.slice(0, 180),
+          timestamp: lastMessage.createdAt,
+        } : null,
+      };
+    })
+    .sort((a, b) => new Date(b.latestActivityAt) - new Date(a.latestActivityAt))
+    .slice(0, 20);
+
+  res.status(200).json({ sessions: ordered });
+}));
+
 app.get('/api/ai/chat/:sessionId/history', ...studentOnly, asyncHandler(async (req, res) => {
   const session = await findOwnedSession(req.params.sessionId, req.user.userId);
   if (!session) return res.status(404).json({ error: 'Chat session not found.' });
