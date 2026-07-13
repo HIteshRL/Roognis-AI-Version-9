@@ -34,6 +34,7 @@ describe('validation', () => {
   it('validates MVP analytics event types', () => {
     assert.equal(validateEventType('chat_message'), 'chat_message');
     assert.equal(validateEventType('video_recommended'), 'video_recommended');
+    assert.equal(validateEventType('study_time_tracked'), 'study_time_tracked');
     assert.equal(validateEventType('quiz_graded'), 'quiz_graded');
     assert.equal(validateEventType('unknown_event'), null);
   });

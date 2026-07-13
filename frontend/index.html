@@ -362,6 +362,15 @@
       font-size: 12px;
     }
 
+    .app-shell[data-role="student"] .topbar-copy,
+    .app-shell[data-role="student"] #connection-pill {
+      display: none;
+    }
+
+    .app-shell[data-role="student"] .topbar {
+      justify-content: flex-end;
+    }
+
     .user-chip {
       min-height: 42px;
       display: flex;
@@ -549,6 +558,35 @@
       line-height: 1;
     }
 
+    .streak-card {
+      position: relative;
+      overflow: hidden;
+    }
+
+    .streak-card .summary-value {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+
+    .flame-badge {
+      width: 42px;
+      height: 42px;
+      border-radius: 50%;
+      display: grid;
+      place-items: center;
+      color: #b85c1d;
+      background: #fff0d8;
+      border: 1px solid #f3d8ad;
+    }
+
+    .flame-badge .icon {
+      width: 24px;
+      height: 24px;
+      flex-basis: 24px;
+      stroke-width: 2.2;
+    }
+
     .summary-help {
       margin-top: 10px;
       color: var(--muted);
@@ -666,6 +704,25 @@
       color: var(--muted);
       font-size: 13px;
       line-height: 1.5;
+    }
+
+    .diagram-empty {
+      min-height: 360px;
+      border: 1px dashed #cfd9d2;
+      border-radius: var(--radius);
+      background: #fbfcfb;
+      display: grid;
+      place-items: center;
+      text-align: center;
+      padding: 28px;
+      color: var(--muted);
+    }
+
+    .diagram-empty strong {
+      display: block;
+      color: var(--ink);
+      font-size: 18px;
+      margin-bottom: 6px;
     }
 
     .chat-panel {
@@ -801,9 +858,90 @@
       border-top: 1px solid var(--line);
     }
 
+    .chat-session-list {
+      display: grid;
+      gap: 8px;
+    }
+
+    .chat-session-card {
+      width: 100%;
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      background: #ffffff;
+      padding: 10px 12px;
+      text-align: left;
+      cursor: pointer;
+    }
+
+    .chat-session-card.active,
+    .chat-session-card:hover {
+      border-color: #b9cabf;
+      background: #f7faf8;
+    }
+
+    .chat-session-title {
+      color: var(--ink);
+      font-weight: 820;
+      line-height: 1.25;
+    }
+
+    .chat-session-meta,
+    .chat-session-preview {
+      margin-top: 4px;
+      color: var(--muted);
+      font-size: 12px;
+      line-height: 1.35;
+    }
+
     .side-stack {
       display: grid;
       gap: 16px;
+    }
+
+    @media (min-width: 1101px) {
+      #student-tutor.view.active {
+        height: calc(100vh - 124px);
+        min-height: 0;
+        display: flex;
+        flex-direction: column;
+        overflow: hidden;
+      }
+
+      #student-tutor .page-head {
+        flex: 0 0 auto;
+      }
+
+      #student-tutor .student-chat-grid {
+        flex: 1;
+        min-height: 0;
+        align-items: stretch;
+      }
+
+      #student-tutor .chat-panel {
+        height: 100%;
+        min-height: 0;
+        overflow: hidden;
+        grid-template-rows: auto minmax(0, 1fr) auto;
+      }
+
+      #student-tutor .chat-thread {
+        min-height: 0;
+        overflow-y: auto;
+      }
+
+      #student-tutor .side-stack {
+        min-height: 0;
+        max-height: 100%;
+        overflow-y: auto;
+        padding-right: 4px;
+        align-content: start;
+      }
+
+      #student-tutor .chat-session-list {
+        max-height: 240px;
+        overflow-y: auto;
+        padding-right: 2px;
+      }
     }
 
     .rating {
@@ -1088,11 +1226,11 @@
         <form class="auth-form" id="login-form">
           <div class="field-group">
             <label for="email">Email</label>
-            <input class="field" id="email" value="arjun@demo.com" autocomplete="email">
+            <input class="field" id="email" autocomplete="email" required>
           </div>
           <div class="field-group">
             <label for="password">Password</label>
-            <input class="field" id="password" value="demo1234" type="password" autocomplete="current-password">
+            <input class="field" id="password" type="password" autocomplete="current-password" required>
           </div>
           <button class="btn primary" type="submit">
             <svg class="icon" viewBox="0 0 24 24"><path d="M5 12h14"/><path d="m13 6 6 6-6 6"/></svg>
@@ -1101,12 +1239,6 @@
           <div class="form-status" id="auth-status"></div>
         </form>
 
-        <div class="demo-hint">
-          <strong>Demo accounts</strong>
-          <div class="small">
-            <code>arjun@demo.com</code>, <code>teacher@demo.com</code>, and <code>parent1@demo.com</code> use password <code>demo1234</code>.
-          </div>
-        </div>
       </main>
     </div>
   </section>
@@ -1125,7 +1257,7 @@
 
       <div class="sidebar-bottom">
         <div class="mini-card">
-          <strong id="context-title">MVP scope</strong>
+          <strong id="context-title">Learning</strong>
           <p id="context-copy">Auth and AI tutor flows are active first.</p>
         </div>
         <button class="btn" id="logout-btn">Log out</button>
@@ -1135,10 +1267,10 @@
     <main class="main">
       <header class="topbar">
         <div class="topbar-copy">
-          <div class="topbar-title" id="topbar-title">Student MVP</div>
+          <div class="topbar-title" id="topbar-title">Home</div>
           <div class="topbar-subtitle" id="topbar-subtitle">Auth, tutor chat, diagrams, videos, and feedback</div>
         </div>
-        <span class="pill amber" id="connection-pill"><span class="dot"></span>Demo preview</span>
+        <span class="pill amber" id="connection-pill"><span class="dot"></span>Connecting</span>
         <button class="btn icon-only" aria-label="Notifications">
           <svg class="icon" viewBox="0 0 24 24"><path d="M18 8a6 6 0 1 0-12 0c0 7-3 7-3 9h18c0-2-3-2-3-9"/><path d="M10 21h4"/></svg>
         </button>
@@ -1152,9 +1284,9 @@
         <section class="view active" id="student-mvp">
           <div class="page-head">
             <div>
-              <p class="eyebrow">Student MVP</p>
-              <h1>Start with the AI tutor.</h1>
-              <p class="subtext">This screen only shows flows backed by services already present in the repo.</p>
+              <p class="eyebrow">Learning</p>
+              <h1>Continue learning.</h1>
+              <p class="subtext">Ask doubts, create diagrams, and save useful videos from your current lesson.</p>
             </div>
             <div class="actions">
               <button class="btn" data-route="student-videos">Open videos</button>
@@ -1163,15 +1295,20 @@
           </div>
 
           <div class="grid dashboard-grid">
-            <div class="summary-card span-3">
+            <div class="summary-card span-3 streak-card">
               <div class="summary-label">Learning streak</div>
-              <div class="summary-value" id="student-streak-value">0</div>
-              <div class="summary-help" id="student-streak-help">Days active from tutor, diagram, video, and quiz events.</div>
+              <div class="summary-value">
+                <span id="student-streak-value">0</span>
+                <span class="flame-badge" aria-label="Learning streak">
+                  <svg class="icon" viewBox="0 0 24 24"><path d="M8.5 14.5A4.5 4.5 0 0 0 13 19a4.5 4.5 0 0 0 4.5-4.5c0-2.7-1.7-4.5-3.4-6.3-.9-.9-1.7-1.9-2.1-3.2-2 1.2-3.2 3.1-3 5.3-1-.5-1.8-1.2-2.4-2.1-.8 1.2-1.3 2.6-1.3 4.1A7.2 7.2 0 0 0 13 19"/></svg>
+                </span>
+              </div>
+              <div class="summary-help" id="student-streak-help">Consecutive active learning days.</div>
             </div>
             <div class="summary-card span-3">
-              <div class="summary-label">Time spent</div>
+              <div class="summary-label">Tracked study time</div>
               <div class="summary-value" id="student-time-value">0m</div>
-              <div class="summary-help">This week from learning activity events.</div>
+              <div class="summary-help">Only counts events with real duration.</div>
             </div>
             <div class="summary-card span-3">
               <div class="summary-label">Lessons done</div>
@@ -1181,13 +1318,12 @@
             <div class="summary-card span-3">
               <div class="summary-label">Practice progress</div>
               <div class="summary-value" id="student-progress-value">0%</div>
-              <div class="summary-help">Estimated from tutor, diagram, video, and quiz activity.</div>
+              <div class="summary-help">From quiz and practice events when available.</div>
             </div>
 
             <section class="panel span-7">
               <div class="panel-header">
                 <div class="panel-title">Student flow</div>
-                <span class="pill">MVP path</span>
               </div>
               <div class="panel-body list">
                 <div class="list-item">
@@ -1273,7 +1409,10 @@
                   <svg class="icon" viewBox="0 0 24 24"><path d="M21 15a4 4 0 0 1-4 4H8l-5 3V7a4 4 0 0 1 4-4h10a4 4 0 0 1 4 4z"/></svg>
                   Tutor session
                 </div>
-                <span class="pill" id="session-pill"><span class="dot"></span>Ready</span>
+                <div class="actions">
+                  <button class="btn" id="new-chat-btn" type="button">New chat</button>
+                  <span class="pill" id="session-pill"><span class="dot"></span>Ready</span>
+                </div>
               </div>
               <div class="chat-thread" id="chat-thread">
                 <div class="chat-empty" id="chat-empty">
@@ -1291,6 +1430,23 @@
             </section>
 
             <div class="side-stack">
+              <section class="panel">
+                <div class="panel-header">
+                  <div class="panel-title">Recent chats</div>
+                  <button class="btn icon-only" id="refresh-chat-sessions-btn" type="button" aria-label="Refresh chats">
+                    <svg class="icon" viewBox="0 0 24 24"><path d="M21 12a9 9 0 0 1-9 9 9.8 9.8 0 0 1-6.7-2.7"/><path d="M3 12a9 9 0 0 1 9-9 9.8 9.8 0 0 1 6.7 2.7"/><path d="M21 3v6h-6"/><path d="M3 21v-6h6"/></svg>
+                  </button>
+                </div>
+                <div class="panel-body">
+                  <div class="chat-session-list" id="chat-session-list">
+                    <div class="quiet-box">
+                      <strong>No saved chats yet.</strong>
+                      <p>Ask the tutor once and the conversation will appear here.</p>
+                    </div>
+                  </div>
+                </div>
+              </section>
+
               <section class="panel">
                 <div class="panel-header">
                   <div class="panel-title">Feedback</div>
@@ -1332,28 +1488,21 @@
             <div>
               <p class="eyebrow">Diagrams</p>
               <h1>Create safe educational diagrams.</h1>
-              <p class="subtext">The image route accepts a prompt, creates a job, and returns job status until the image is ready.</p>
+              <p class="subtext">Type the diagram you need and generate a fresh school-safe image.</p>
             </div>
           </div>
           <section class="panel">
             <div class="panel-header">
-              <div class="panel-title">Photosynthesis diagram</div>
+              <div class="panel-title">New diagram</div>
               <span class="pill" id="image-status">Ready</span>
             </div>
             <div class="panel-body">
-              <svg class="diagram" id="diagram-placeholder" viewBox="0 0 480 360" role="img" aria-label="Photosynthesis diagram">
-                <rect width="480" height="360" fill="#fbfcfb"/>
-                <circle cx="82" cy="74" r="34" fill="#f1c66b"/>
-                <path d="M82 18v20M82 110v20M26 74h20M118 74h20M42 34l14 14M122 34l-14 14" stroke="#b8792a" stroke-width="5" stroke-linecap="round"/>
-                <path d="M242 282c-8-74 10-142 76-198" stroke="#3e7d5b" stroke-width="13" stroke-linecap="round"/>
-                <path d="M254 186c-76 6-118 40-126 88 72 10 118-16 126-88z" fill="#8fc29e"/>
-                <path d="M270 162c79-32 139-16 166 34-62 40-123 35-166-34z" fill="#67a777"/>
-                <text x="44" y="136" fill="#80511d" font-size="18" font-weight="700">Sunlight</text>
-                <text x="146" y="112" fill="#284c7d" font-size="18" font-weight="700">CO2</text>
-                <text x="320" y="108" fill="#284c7d" font-size="18" font-weight="700">Oxygen</text>
-                <text x="62" y="310" fill="#284c7d" font-size="18" font-weight="700">Water</text>
-                <text x="278" y="302" fill="#28553f" font-size="20" font-weight="800">Glucose</text>
-              </svg>
+              <div class="diagram-empty" id="diagram-placeholder">
+                <div>
+                  <strong>No diagram generated yet.</strong>
+                  <span>Enter a topic below and generate a fresh diagram.</span>
+                </div>
+              </div>
               <img class="generated-image hidden" id="generated-image" alt="Generated educational diagram">
               <div class="prompt-row">
                 <input class="field" id="image-prompt" value="photosynthesis process diagram for grade 6">
@@ -1418,7 +1567,7 @@
             <div class="summary-card span-3">
               <div class="summary-label">Class students</div>
               <div class="summary-value" id="teacher-student-count">0</div>
-              <div class="summary-help">Students in assigned classes or demo school fallback.</div>
+              <div class="summary-help">Students assigned to your classes.</div>
             </div>
             <div class="summary-card span-3">
               <div class="summary-label">Active this week</div>
@@ -1672,7 +1821,7 @@
                   </div>
                   <div>
                     <div class="item-title">Arjun Sharma</div>
-                    <div class="item-subtitle">Seed link for parent1@demo.com</div>
+                    <div class="item-subtitle">Linked by school</div>
                   </div>
                   <span class="pill">Ready</span>
                 </div>
@@ -1728,11 +1877,11 @@
     const roleConfig = {
       student: {
         label: 'Student workspace',
-        contextTitle: 'MVP scope',
-        contextCopy: 'Auth, tutor chat, diagrams, videos, and feedback.',
+        contextTitle: 'Learning',
+        contextCopy: 'Tutor chat, diagrams, videos, and parent progress.',
         defaultRoute: 'student-mvp',
         nav: [
-          ['student-mvp', 'MVP Home', iconPaths.dashboard],
+          ['student-mvp', 'Home', iconPaths.dashboard],
           ['student-tutor', 'Tutor', iconPaths.chat],
           ['student-diagrams', 'Diagrams', iconPaths.image],
           ['student-videos', 'Videos', iconPaths.video],
@@ -1760,33 +1909,36 @@
     };
 
     const routeMeta = {
-      'student-mvp': ['Student MVP', 'Auth, tutor chat, diagrams, videos, and feedback'],
-      'student-tutor': ['Tutor Chat', 'Student AI chat with safety checks and session history'],
-      'student-diagrams': ['Diagrams', 'Safe image job creation and status polling'],
-      'student-videos': ['Videos', 'Real-time video recommendations from tutor chat'],
+      'student-mvp': ['Home', 'Learning dashboard'],
+      'student-tutor': ['Tutor', 'Ask questions from your selected lesson'],
+      'student-diagrams': ['Diagrams', 'Create school diagrams'],
+      'student-videos': ['Videos', 'Video recommendations from tutor chat'],
       'teacher-mvp': ['Teacher Dashboard', 'Class activity and knowledge coverage'],
       'teacher-ingestion': ['Knowledge Ingestion', 'Upload PDFs into the Educational Knowledge Engine'],
       'parent-mvp': ['Parent Progress', 'Linked child summary from analytics'],
     };
 
-    const demoUsers = {
-      'arjun@demo.com': { role: 'student', name: 'Arjun Sharma', initials: 'AS' },
-      'teacher@demo.com': { role: 'teacher', name: 'Demo Teacher', initials: 'DT' },
-      'parent1@demo.com': { role: 'parent', name: 'Parent One', initials: 'PO' },
-      'parent2@demo.com': { role: 'parent', name: 'Parent Two', initials: 'PT' },
+    const defaultUsers = {
+      student: { role: 'student', name: 'Student', initials: 'ST' },
+      teacher: { role: 'teacher', name: 'Teacher', initials: 'TE' },
+      parent: { role: 'parent', name: 'Parent', initials: 'PA' },
     };
 
     const state = {
       role: 'student',
-      user: demoUsers['arjun@demo.com'],
+      user: defaultUsers.student,
       apiOnline: false,
       demoMode: false,
       sessionId: null,
       lastAssistantMessageId: null,
       feedbackRating: 5,
       chatVideoRecommendations: [],
+      chatSessions: [],
       availableLessons: [],
       selectedLessonKey: null,
+      pendingActiveSeconds: 0,
+      lastActivityTickAt: Date.now(),
+      activityFlushInFlight: false,
       ingestionPollTimer: null,
       activeIngestionDocumentId: null,
       selectedParentStudentId: null,
@@ -1825,14 +1977,6 @@
       } catch (error) {
         return '#';
       }
-    }
-
-    function demoUserFor(email) {
-      const normalized = email.toLowerCase();
-      if (demoUsers[normalized]) return demoUsers[normalized];
-      if (normalized.includes('teacher')) return demoUsers['teacher@demo.com'];
-      if (normalized.includes('parent')) return demoUsers['parent1@demo.com'];
-      return demoUsers['arjun@demo.com'];
     }
 
     function setConnection(online, copy) {
@@ -1926,6 +2070,7 @@
       const loadData = options.loadData !== false;
       state.role = role;
       state.user = user;
+      appShell.dataset.role = role;
       state.sessionId = null;
       state.lastAssistantMessageId = null;
       state.activeIngestionDocumentId = null;
@@ -1944,6 +2089,7 @@
       if (!loadData) return;
       if (role === 'student') {
         loadStudentLessons();
+        loadChatSessions();
         loadVideoTopics();
         loadStudentDashboard();
       }
@@ -1962,7 +2108,10 @@
       const meta = routeMeta[route] || routeMeta[roleConfig[state.role].defaultRoute];
       document.querySelector('#topbar-title').textContent = meta[0];
       document.querySelector('#topbar-subtitle').textContent = meta[1];
-      if (route === 'student-tutor') loadStudentLessons();
+      if (route === 'student-tutor') {
+        loadStudentLessons();
+        loadChatSessions();
+      }
       if (route === 'teacher-ingestion') loadTeacherDocuments();
     }
 
@@ -1987,14 +2136,14 @@
           userId: payload.userId,
         };
         state.demoMode = false;
-        setConnection(true, 'Backend connected');
+        setConnection(true, 'Online');
         setRole(payload.role, user);
         authStatus.textContent = '';
         authScreen.classList.add('hidden');
         appShell.classList.remove('hidden');
       } catch (error) {
         const backendReachable = Boolean(error.status && error.status < 500);
-        setConnection(backendReachable, backendReachable ? 'Backend connected' : 'Backend unavailable');
+        setConnection(backendReachable, backendReachable ? 'Online' : 'Offline');
         authStatus.textContent = error.message || 'Could not sign in.';
       } finally {
         submitButton.disabled = false;
@@ -2006,7 +2155,7 @@
         try {
           await apiJson('/api/auth/logout', { method: 'POST' });
         } catch (error) {
-          setConnection(false, 'Backend unavailable');
+          setConnection(false, 'Offline');
         }
       }
       state.demoMode = false;
@@ -2017,7 +2166,7 @@
       document.querySelector('#session-pill').innerHTML = '<span class="dot"></span>Ready';
       appShell.classList.add('hidden');
       authScreen.classList.remove('hidden');
-      setRole('student', demoUsers['arjun@demo.com'], { loadData: false });
+      setRole('student', defaultUsers.student, { loadData: false });
     });
 
     document.addEventListener('click', event => {
@@ -2079,12 +2228,12 @@
           .map(documentToStudentLesson)
           .filter(Boolean);
         renderStudentLessonOptions(lessons);
-        setConnection(true, 'Backend connected');
+        setConnection(true, 'Online');
       } catch (error) {
         state.availableLessons = [];
         state.selectedLessonKey = null;
         renderStudentLessonOptions([], error.message);
-        if (!error.status) setConnection(false, 'Backend unavailable');
+        if (!error.status) setConnection(false, 'Offline');
       }
     }
 
@@ -2245,14 +2394,14 @@
 
       try {
         const payload = await apiJson('/api/rag/documents');
-        setConnection(true, 'Backend connected');
+        setConnection(true, 'Online');
         renderTeacherDocuments(payload.documents || []);
       } catch (error) {
         countPill.textContent = '0 documents';
         renderLibrarySummary([]);
         renderTeacherKnowledgeSummary([]);
         list.innerHTML = `<div class="quiet-box"><strong>Documents unavailable.</strong><p>${escapeHtml(error.message)}</p></div>`;
-        if (!error.status) setConnection(false, 'Backend unavailable');
+        if (!error.status) setConnection(false, 'Offline');
       }
     }
 
@@ -2374,7 +2523,7 @@
           state.ingestionPollTimer = setTimeout(poll, 1400);
         } catch (error) {
           setIngestionState('failed', error.message, 0);
-          if (!error.status) setConnection(false, 'Backend unavailable');
+          if (!error.status) setConnection(false, 'Offline');
         }
       };
 
@@ -2409,7 +2558,7 @@
         }, 1400);
       } catch (error) {
         setIngestionState('failed', error.message, 0);
-        if (!error.status) setConnection(false, 'Backend unavailable');
+        if (!error.status) setConnection(false, 'Offline');
       }
     }
 
@@ -2447,7 +2596,7 @@
 
       try {
         const payload = await apiForm('/api/rag/upload', new FormData(form));
-        setConnection(true, 'Backend connected');
+        setConnection(true, 'Online');
         renderIngestionResult(payload, null);
         setIngestionState(
           payload.status === 'ready' ? 'complete' : 'processing',
@@ -2458,7 +2607,7 @@
         await loadTeacherDocuments();
       } catch (error) {
         setIngestionState('failed', error.message, 0);
-        if (!error.status) setConnection(false, 'Backend unavailable');
+        if (!error.status) setConnection(false, 'Offline');
       } finally {
         submitButton.disabled = false;
       }
@@ -2471,6 +2620,123 @@
       if (!button) return;
       loadDocumentIngestionStatus(button.dataset.documentStatus);
     });
+
+    async function loadChatSessions() {
+      const list = document.querySelector('#chat-session-list');
+      if (!list || state.role !== 'student') return;
+
+      if (state.demoMode) {
+        renderChatSessions([]);
+        return;
+      }
+
+      try {
+        const payload = await apiJson('/api/ai/chat/sessions');
+        state.chatSessions = payload.sessions || [];
+        renderChatSessions(state.chatSessions);
+      } catch (error) {
+        state.chatSessions = [];
+        list.innerHTML = `<div class="quiet-box"><strong>Saved chats unavailable.</strong><p>${escapeHtml(error.message)}</p></div>`;
+        if (!error.status) setConnection(false, 'Offline');
+      }
+    }
+
+    function renderChatSessions(sessions) {
+      const list = document.querySelector('#chat-session-list');
+      if (!list) return;
+
+      if (!sessions.length) {
+        list.innerHTML = `
+          <div class="quiet-box">
+            <strong>No saved chats yet.</strong>
+            <p>Ask the tutor once and the conversation will appear here.</p>
+          </div>
+        `;
+        return;
+      }
+
+      list.innerHTML = sessions.map(session => {
+        const active = session.sessionId === state.sessionId ? ' active' : '';
+        const title = session.chapterName || session.subject || 'Tutor chat';
+        const meta = [
+          session.subject,
+          session.grade ? `Grade ${session.grade}` : '',
+          session.chapterNumber ? `Chapter ${session.chapterNumber}` : '',
+          `${Number(session.messageCount || 0)} messages`,
+          formatSessionDate(session.latestActivityAt),
+        ].filter(Boolean).join(' - ');
+        const preview = session.lastMessage?.content || 'No messages yet';
+        return `
+          <button class="chat-session-card${active}" type="button" data-chat-session="${escapeHtml(session.sessionId)}">
+            <div class="chat-session-title">${escapeHtml(title)}</div>
+            <div class="chat-session-meta">${escapeHtml(meta)}</div>
+            <div class="chat-session-preview">${escapeHtml(preview)}</div>
+          </button>
+        `;
+      }).join('');
+    }
+
+    async function openChatSession(sessionId) {
+      const session = state.chatSessions.find(item => item.sessionId === sessionId);
+      if (!session) return;
+
+      state.sessionId = session.sessionId;
+      applyLessonFromSession(session);
+      document.querySelector('#session-pill').innerHTML = '<span class="dot"></span>Loading chat';
+      renderChatSessions(state.chatSessions);
+
+      try {
+        const history = await apiJson(`/api/ai/chat/${encodeURIComponent(session.sessionId)}/history`);
+        renderHistoryMessages(history);
+        const latestAssistant = [...history].reverse().find(message => message.role === 'assistant');
+        state.lastAssistantMessageId = latestAssistant ? latestAssistant.messageId : null;
+        document.querySelector('#session-pill').innerHTML = '<span class="dot"></span>Continued chat';
+      } catch (error) {
+        document.querySelector('#session-pill').innerHTML = '<span class="dot"></span>Could not load';
+        if (!error.status) setConnection(false, 'Offline');
+      }
+    }
+
+    function applyLessonFromSession(session) {
+      const match = state.availableLessons.find(lesson => {
+        const context = lesson.context || {};
+        return cleanText(context.subject).toLowerCase() === cleanText(session.subject).toLowerCase()
+          && Number(context.grade || 0) === Number(session.grade || 0)
+          && Number(context.chapterNumber || 0) === Number(session.chapterNumber || 0)
+          && cleanText(context.chapterName).toLowerCase() === cleanText(session.chapterName).toLowerCase();
+      });
+      if (!match) return;
+      state.selectedLessonKey = match.key;
+      const select = document.querySelector('#lesson-select');
+      if (select) select.value = match.key;
+      renderSelectedLessonSummary();
+    }
+
+    function renderHistoryMessages(history) {
+      const thread = document.querySelector('#chat-thread');
+      thread.innerHTML = '';
+      if (!history.length) {
+        renderEmptyChatState();
+        return;
+      }
+
+      history.forEach(message => {
+        const role = message.role === 'user' ? 'student' : 'tutor';
+        const node = appendMessage(role, '', formatSessionDate(message.timestamp));
+        if (role === 'tutor') setMessageRichText(node, message.content);
+        else setMessageText(node, message.content);
+      });
+      scrollChatToBottom();
+    }
+
+    function startNewTutorChat() {
+      state.sessionId = null;
+      state.lastAssistantMessageId = null;
+      state.chatVideoRecommendations = [];
+      renderEmptyChatState();
+      document.querySelector('#session-pill').innerHTML = '<span class="dot"></span>Ready';
+      renderChatSessions(state.chatSessions);
+    }
 
     function appendMessage(role, text, meta) {
       const thread = document.querySelector('#chat-thread');
@@ -2620,6 +2886,7 @@
       });
       state.sessionId = payload.sessionId;
       document.querySelector('#session-pill').innerHTML = '<span class="dot"></span>Session active';
+      loadChatSessions();
       return state.sessionId;
     }
 
@@ -2637,6 +2904,7 @@
       renderSelectedLessonSummary();
       renderEmptyChatState();
       document.querySelector('#session-pill').innerHTML = '<span class="dot"></span>Ready';
+      renderChatSessions(state.chatSessions);
     }
 
     function parseSseChunk(chunk, onToken, onVideoRecommendation, onAnswerContext, onStatus) {
@@ -2724,6 +2992,7 @@
       }
       await refreshLatestAssistantMessageId();
       document.querySelector('#session-pill').innerHTML = '<span class="dot"></span>Response saved';
+      loadChatSessions();
       loadStudentDashboard();
     }
 
@@ -2744,6 +3013,14 @@
       }
       return 'I can help with this lesson in simple steps. First tell me the subject and the exact part that is confusing.';
     }
+
+    document.querySelector('#new-chat-btn').addEventListener('click', startNewTutorChat);
+    document.querySelector('#refresh-chat-sessions-btn').addEventListener('click', loadChatSessions);
+    document.querySelector('#chat-session-list').addEventListener('click', event => {
+      const button = event.target.closest('[data-chat-session]');
+      if (!button) return;
+      openChatSession(button.dataset.chatSession);
+    });
 
     document.querySelector('#chat-form').addEventListener('submit', async event => {
       event.preventDefault();
@@ -2768,7 +3045,7 @@
         await streamTutorAnswer(text, tutorNode);
       } catch (error) {
         setMessageText(tutorNode, error.message || 'The AI service could not answer. Try again after backend services are running.');
-        if (!error.status) setConnection(false, 'Backend unavailable');
+        if (!error.status) setConnection(false, 'Offline');
       } finally {
         sendButton.disabled = false;
       }
@@ -2860,7 +3137,7 @@
       if (state.demoMode) {
         setTimeout(() => {
           status.textContent = 'Demo done';
-          note.textContent = 'Static preview is showing the sample diagram. Sign in with backend to generate a real image.';
+          note.textContent = 'Sign in with backend to generate a real image.';
           button.disabled = false;
         }, 500);
         return;
@@ -3069,6 +3346,82 @@
     function setText(selector, value) {
       const node = document.querySelector(selector);
       if (node) node.textContent = value;
+    }
+
+    function activeRouteId() {
+      return document.querySelector('.view.active')?.id || '';
+    }
+
+    function shouldTrackStudentActivity() {
+      return state.role === 'student'
+        && state.apiOnline
+        && !state.demoMode
+        && !document.hidden
+        && !appShell.classList.contains('hidden');
+    }
+
+    function activitySubject() {
+      return selectedLesson()?.context?.subject || 'General';
+    }
+
+    function startStudentActivityTracking() {
+      state.lastActivityTickAt = Date.now();
+      window.setInterval(trackStudentActivityTick, 10000);
+      document.addEventListener('visibilitychange', () => {
+        if (document.hidden) flushStudentActivity({ force: true });
+        state.lastActivityTickAt = Date.now();
+      });
+      window.addEventListener('beforeunload', () => {
+        flushStudentActivity({ keepalive: true, force: true });
+      });
+    }
+
+    function trackStudentActivityTick() {
+      const now = Date.now();
+      const elapsedSeconds = Math.min(30, Math.max(0, Math.round((now - state.lastActivityTickAt) / 1000)));
+      state.lastActivityTickAt = now;
+
+      if (!shouldTrackStudentActivity()) return;
+      state.pendingActiveSeconds += elapsedSeconds;
+      if (state.pendingActiveSeconds >= 30) flushStudentActivity();
+    }
+
+    async function flushStudentActivity(options = {}) {
+      const canFlush = options.force
+        ? state.role === 'student' && state.apiOnline && !state.demoMode && !appShell.classList.contains('hidden')
+        : shouldTrackStudentActivity();
+      if (state.activityFlushInFlight || !canFlush) return;
+      const activeSeconds = Math.round(state.pendingActiveSeconds);
+      if (activeSeconds < 5) return;
+
+      state.pendingActiveSeconds = 0;
+      state.activityFlushInFlight = true;
+      try {
+        const response = await fetch('/api/analytics/student/activity', {
+          method: 'POST',
+          credentials: 'include',
+          keepalive: Boolean(options.keepalive),
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            activeSeconds,
+            route: activeRouteId(),
+            subject: activitySubject(),
+          }),
+        });
+        if (!response.ok) state.pendingActiveSeconds += activeSeconds;
+        if (response.ok && activeRouteId() === 'student-mvp') loadStudentDashboard();
+      } catch (error) {
+        state.pendingActiveSeconds += activeSeconds;
+      } finally {
+        state.activityFlushInFlight = false;
+      }
+    }
+
+    function formatSessionDate(value) {
+      if (!value) return '';
+      const date = new Date(value);
+      if (Number.isNaN(date.getTime())) return '';
+      return date.toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
     }
 
     function formatDuration(seconds) {
@@ -3294,7 +3647,7 @@
     async function restoreExistingSession() {
       const authStatus = document.querySelector('#auth-status');
       authStatus.textContent = 'Checking backend session...';
-      setRole('student', demoUsers['arjun@demo.com']);
+      setRole('student', defaultUsers.student, { loadData: false });
 
       try {
         const payload = await apiJson('/api/auth/me');
@@ -3305,22 +3658,23 @@
           userId: payload.userId,
         };
         state.demoMode = false;
-        setConnection(true, 'Backend connected');
+        setConnection(true, 'Online');
         setRole(payload.role, user);
         authStatus.textContent = '';
         authScreen.classList.add('hidden');
         appShell.classList.remove('hidden');
       } catch (error) {
         if (error.status === 401) {
-          setConnection(true, 'Backend connected');
+          setConnection(true, 'Online');
           authStatus.textContent = '';
           return;
         }
-        setConnection(false, 'Backend unavailable');
-        authStatus.textContent = 'Backend is not reachable yet. Start Docker services and sign in with a demo account.';
+        setConnection(false, 'Offline');
+        authStatus.textContent = 'Backend is not reachable yet. Start services and sign in again.';
       }
     }
 
+    startStudentActivityTracking();
     restoreExistingSession();
   </script>
 </body>

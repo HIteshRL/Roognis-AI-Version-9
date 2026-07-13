@@ -83,6 +83,37 @@ router.post('/event', requireInternalToken, async (req, res) => {
   }
 });
 
+// POST /api/analytics/student/activity — student-authenticated active-time tracking
+router.post('/student/activity', ...studentOnly, async (req, res) => {
+  try {
+    const activeSeconds = Number(req.body?.activeSeconds);
+    if (!Number.isFinite(activeSeconds) || activeSeconds < 5 || activeSeconds > 600) {
+      return res.status(400).json({ error: 'activeSeconds must be between 5 and 600.' });
+    }
+
+    const subject = normalizeSubject(req.body?.subject);
+    const route = normalizeOptionalString(req.body?.route, 80);
+
+    await prisma.event.create({
+      data: {
+        type: 'study_time_tracked',
+        studentId: req.user.userId,
+        schoolId: req.user.schoolId,
+        subject,
+        metadata: {
+          activeSeconds: Math.round(activeSeconds),
+          route,
+        },
+      },
+    });
+
+    return res.status(202).json({ received: true });
+  } catch (err) {
+    console.error('[analytics] student activity error:', err);
+    return res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
 // POST /api/analytics/class/assign — assign student to teacher class
 router.post('/class/assign', ...teacherOnly, async (req, res) => {
   try {

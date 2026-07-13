@@ -9,6 +9,8 @@ const requireAuth = require('../middleware/auth');
 const router = express.Router();
 const prisma = new PrismaClient();
 
+const SESSION_MAX_AGE_MS = 86_400_000; // 24 hours
+
 const loginLimiter = rateLimit({
   windowMs: 60_000,
   max: 10,
@@ -17,18 +19,40 @@ const loginLimiter = rateLimit({
   message: { error: 'Too many login attempts. Please try again in a minute.' },
 });
 
-function issueJwtCookie(res, token) {
-  res.cookie('jwt', token, {
+function isSecureCookieEnabled() {
+  if (process.env.COOKIE_SECURE) return process.env.COOKIE_SECURE === 'true';
+  return process.env.NODE_ENV === 'production';
+}
+
+function jwtCookieOptions() {
+  return {
     httpOnly: true,
     sameSite: 'Strict',
+    secure: isSecureCookieEnabled(),
     path: '/',
-    maxAge: 86_400_000, // 24 hours
-  });
+    maxAge: SESSION_MAX_AGE_MS,
+  };
+}
+
+function issueJwtCookie(res, token) {
+  res.cookie('jwt', token, jwtCookieOptions());
+}
+
+function clearJwtCookie(res) {
+  const { maxAge, ...clearOptions } = jwtCookieOptions();
+  res.clearCookie('jwt', clearOptions);
+}
+
+function selfRegistrationEnabled() {
+  return process.env.ALLOW_SELF_REGISTRATION === 'true';
 }
 
 // POST /api/auth/register
 router.post('/register', async (req, res) => {
   try {
+    if (!selfRegistrationEnabled())
+      return res.status(403).json({ error: 'Self registration is disabled. Contact your school administrator.' });
+
     const { name, email, password, role, schoolId } = req.body;
 
     if (!name || !email || !password || !role || !schoolId)
@@ -105,7 +129,7 @@ router.post('/login', loginLimiter, async (req, res) => {
 
 // POST /api/auth/logout
 router.post('/logout', requireAuth, (req, res) => {
-  res.clearCookie('jwt', { path: '/' });
+  clearJwtCookie(res);
   return res.status(200).json({ message: 'Logged out successfully.' });
 });
 
@@ -137,7 +161,7 @@ router.get('/me', requireAuth, async (req, res) => {
 router.post(
   '/link-parent',
   requireAuth,
-  requireAuth.requireRole('teacher', 'parent'),
+  requireAuth.requireRole('teacher'),
   async (req, res) => {
     try {
       const { parentId, studentId } = req.body;
@@ -155,6 +179,9 @@ router.post(
 
       if (!student || student.role !== 'student')
         return res.status(400).json({ error: 'studentId does not reference a valid student account.' });
+
+      if (parent.schoolId !== req.user.schoolId || student.schoolId !== req.user.schoolId)
+        return res.status(403).json({ error: 'Forbidden. Parent and student must belong to your school.' });
 
       // Upsert — safe to call multiple times
       await prisma.parentStudent.upsert({
@@ -180,9 +207,18 @@ router.get(
     try {
       const { id } = req.params;
 
-      // Parents can only query their own children; teachers can query any parent
+      // Parents can only query their own children; teachers can query parents in their school.
       if (req.user.role === 'parent' && req.user.userId !== id)
         return res.status(403).json({ error: 'Forbidden. You can only view your own children.' });
+
+      if (req.user.role === 'teacher') {
+        const parent = await prisma.user.findUnique({
+          where:  { id },
+          select: { role: true, schoolId: true },
+        });
+        if (!parent || parent.role !== 'parent' || parent.schoolId !== req.user.schoolId)
+          return res.status(403).json({ error: 'Forbidden. You can only view parents in your school.' });
+      }
 
       const links = await prisma.parentStudent.findMany({
         where:   { parentId: id },

@@ -87,6 +87,9 @@ services:
       DATABASE_URL: "postgresql://postgres:${DB_PASSWORD}@postgres:5432/roognis?schema=auth_db"
       JWT_SECRET: ${JWT_SECRET}
       DEMO_SCHOOL_ID: ${DEMO_SCHOOL_ID}
+      SEED_DEMO_USERS: ${SEED_DEMO_USERS:-true}
+      ALLOW_SELF_REGISTRATION: ${ALLOW_SELF_REGISTRATION:-false}
+      COOKIE_SECURE: ${COOKIE_SECURE:-false}
       PORT: 3001
       NODE_ENV: production
       NODE_TLS_REJECT_UNAUTHORIZED: "0"
