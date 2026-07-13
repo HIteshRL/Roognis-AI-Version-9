@@ -6,8 +6,6 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 from urllib.parse import urlparse
 
-import chromadb
-import ollama
 from sqlalchemy import delete, select
 from sqlalchemy.orm import Session
 
@@ -61,12 +59,16 @@ class IndexingClient:
 
     def _get_ollama_client(self):
         if self._ollama_client is None:
+            import ollama
+
             self._ollama_client = ollama.Client(host=self.settings.ollama_url)
         return self._ollama_client
 
     def _get_chroma_collection(self, collection_name: str):
         if self._chroma_collection is not None:
             return self._chroma_collection
+        import chromadb
+
         parsed = urlparse(self.settings.chroma_url)
         host = parsed.hostname or self.settings.chroma_url
         port = parsed.port or (443 if parsed.scheme == "https" else 8000)

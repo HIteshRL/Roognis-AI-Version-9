@@ -7,9 +7,19 @@ const KNOWN_EVENT_TYPES = [
   'chat_message',
   'feedback_submitted',
   'image_generated',
+  'image_prompt_blocked',
   'safety_input_blocked',
   'safety_output_blocked',
-  'image_prompt_blocked',
+  'video_recommended',
+  'video_opened',
+  'video_completed',
+  'lesson_started',
+  'lesson_completed',
+  'quiz_draft_created',
+  'quiz_published',
+  'quiz_opened',
+  'quiz_submitted',
+  'quiz_graded',
 ];
 
 function isValidUuid(value) {
@@ -27,6 +37,12 @@ function validateAttendanceStatus(status) {
   if (typeof status !== 'string') return null;
   const normalized = status.trim().toLowerCase();
   return ATTENDANCE_STATUSES.has(normalized) ? normalized : null;
+}
+
+function validateEventType(type) {
+  if (typeof type !== 'string') return null;
+  const normalized = type.trim();
+  return KNOWN_EVENT_TYPES.includes(normalized) ? normalized : null;
 }
 
 function validateScorePair(score, maxScore) {
@@ -66,6 +82,7 @@ module.exports = {
   KNOWN_EVENT_TYPES,
   isValidUuid,
   parseDateOnly,
+  validateEventType,
   validateAttendanceStatus,
   validateScorePair,
   normalizeSubject,

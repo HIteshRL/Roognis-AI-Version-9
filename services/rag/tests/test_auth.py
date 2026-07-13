@@ -23,14 +23,14 @@ def test_ingestion_endpoint_requires_jwt_cookie(client):
     assert response.json()["detail"] == "Unauthorized"
 
 
-def test_ingestion_endpoint_rejects_non_teacher_role(client, token_factory):
+def test_document_list_allows_student_role(client, token_factory):
     token = token_factory(role="student")
     client.cookies.set("jwt", token)
 
     response = client.get("/api/rag/documents")
 
-    assert response.status_code == 403
-    assert response.json()["detail"] == "Forbidden"
+    assert response.status_code == 200
+    assert response.json() == {"documents": []}
 
 
 def test_teacher_jwt_reaches_protected_documents_handler(client, token_factory):

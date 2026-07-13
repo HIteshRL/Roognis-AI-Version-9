@@ -3,6 +3,7 @@ const assert = require('node:assert/strict');
 const {
   isValidUuid,
   parseDateOnly,
+  validateEventType,
   validateAttendanceStatus,
   validateScorePair,
 } = require('../lib/validation');
@@ -28,6 +29,13 @@ describe('validation', () => {
     assert.equal(validateAttendanceStatus('ABSENT'), 'absent');
     assert.equal(validateAttendanceStatus('excused'), 'excused');
     assert.equal(validateAttendanceStatus('unknown'), null);
+  });
+
+  it('validates MVP analytics event types', () => {
+    assert.equal(validateEventType('chat_message'), 'chat_message');
+    assert.equal(validateEventType('video_recommended'), 'video_recommended');
+    assert.equal(validateEventType('quiz_graded'), 'quiz_graded');
+    assert.equal(validateEventType('unknown_event'), null);
   });
 
   it('validates score pairs', () => {

@@ -79,6 +79,17 @@ describe('analytics app', () => {
     assert.equal(res.status, 400);
   });
 
+  it('POST /api/analytics/event rejects unknown event types', async () => {
+    const res = await request('POST', '/api/analytics/event', {
+      'x-internal-service-token': process.env.INTERNAL_SERVICE_TOKEN,
+    }, {
+      type: 'made_up_event',
+      schoolId: '550e8400-e29b-41d4-a716-446655440000',
+    });
+    assert.equal(res.status, 400);
+    assert.match(res.body.error, /type must be one of/);
+  });
+
   it('POST /api/analytics/attendance rejects unauthenticated requests', async () => {
     const res = await request('POST', '/api/analytics/attendance', {}, {
       studentId: '550e8400-e29b-41d4-a716-446655440000',

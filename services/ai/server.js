@@ -12,6 +12,10 @@ const {
   validateImagePromptSafety,
   getGeminiSafetySettings,
 } = require('./safety');
+const {
+  buildVideoSearchIntent,
+  rankRealtimeVideos,
+} = require('./video-search');
 
 const app = express();
 const prisma = new PrismaClient();
@@ -35,7 +39,7 @@ const GEMINI_IMAGE_MIME_TYPE = process.env.GEMINI_IMAGE_MIME_TYPE || 'image/jpeg
 const VIDEO_PROVIDER = normalizeProvider(process.env.VIDEO_PROVIDER, ['youtube'], 'youtube');
 const YOUTUBE_API_KEY = process.env.YOUTUBE_API_KEY || '';
 const YOUTUBE_API_BASE_URL = process.env.YOUTUBE_API_BASE_URL || 'https://www.googleapis.com/youtube/v3';
-const VIDEO_SEARCH_MAX_RESULTS = Math.min(Math.max(Number(process.env.VIDEO_SEARCH_MAX_RESULTS || 5), 1), 10);
+const VIDEO_SEARCH_MAX_RESULTS = Math.min(Math.max(Number(process.env.VIDEO_SEARCH_MAX_RESULTS || 10), 1), 10);
 const VIDEO_TRUSTED_CHANNELS = parseCsv(process.env.VIDEO_TRUSTED_CHANNELS || '');
 const IMAGE_PROMPT_MAX_LENGTH = 300;
 const IMAGE_JOB_TIMEOUT_MS = Number(process.env.IMAGE_JOB_TIMEOUT_MS || 5 * 60 * 1000);
@@ -59,17 +63,30 @@ app.post('/api/ai/chat/session', ...studentOnly, asyncHandler(async (req, res) =
   if (!subject) {
     return res.status(400).json({ error: 'subject is required and must be 1-80 characters.' });
   }
+  const lessonContext = normalizeLessonContext(req.body || {});
+  if (!lessonContext.ok) {
+    return res.status(400).json({ error: lessonContext.error });
+  }
 
   const session = await prisma.chatSession.create({
     data: {
       studentId: req.user.userId,
       schoolId: req.user.schoolId,
       subject,
+      ...lessonContext.data,
     },
-    select: { id: true },
+    select: {
+      id: true,
+      subject: true,
+      board: true,
+      curriculum: true,
+      grade: true,
+      chapterNumber: true,
+      chapterName: true,
+    },
   });
 
-  res.status(201).json({ sessionId: session.id });
+  res.status(201).json({ sessionId: session.id, lessonContext: session });
 }));
 
 app.get('/api/ai/chat/:sessionId/history', ...studentOnly, asyncHandler(async (req, res) => {
@@ -142,7 +159,7 @@ app.post('/api/ai/chat', ...studentOnly, asyncHandler(async (req, res) => {
   });
 
   try {
-    const videoRecommendation = await findVideoRecommendationForMessage(message, session.subject);
+    const videoRecommendation = await findVideoRecommendationForMessage(message, session);
     if (videoRecommendation) {
       const assistantContent = buildVideoRecommendationContent(videoRecommendation);
       if (videoRecommendation.videos.length) {
@@ -186,17 +203,25 @@ app.post('/api/ai/chat', ...studentOnly, asyncHandler(async (req, res) => {
       q: message,
       schoolId: session.schoolId,
       subject: session.subject,
+      board: session.board,
+      curriculum: session.curriculum,
+      grade: session.grade,
+      chapterNumber: session.chapterNumber,
       top: 5,
     });
     sendSseEvent(res, 'answer_context', {
       source: chunks.length ? 'rag' : 'general',
       ragChunkCount: chunks.length,
+      subject: session.subject,
+      grade: session.grade,
+      chapterNumber: session.chapterNumber,
     });
 
     const prompt = buildTutorPrompt({
       chunks,
       history,
       question: message,
+      session,
     });
 
     const llmResult = await streamLlmResponse({
@@ -484,6 +509,50 @@ function normalizeSubject(subject) {
   return trimmed;
 }
 
+function normalizeLessonContext(body) {
+  const board = normalizeOptionalText(body.board, 40, 'board');
+  if (board === false) return { ok: false, error: 'board must be a string up to 40 characters.' };
+
+  const curriculum = normalizeOptionalText(body.curriculum, 80, 'curriculum');
+  if (curriculum === false) return { ok: false, error: 'curriculum must be a string up to 80 characters.' };
+
+  const chapterName = normalizeOptionalText(body.chapterName, 160, 'chapterName');
+  if (chapterName === false) return { ok: false, error: 'chapterName must be a string up to 160 characters.' };
+
+  const grade = normalizeOptionalInteger(body.grade, 1, 12);
+  if (grade === false) return { ok: false, error: 'grade must be an integer from 1 to 12.' };
+
+  const chapterNumber = normalizeOptionalInteger(body.chapterNumber, 1, 500);
+  if (chapterNumber === false) return { ok: false, error: 'chapterNumber must be a positive integer.' };
+
+  return {
+    ok: true,
+    data: {
+      board,
+      curriculum,
+      grade,
+      chapterNumber,
+      chapterName,
+    },
+  };
+}
+
+function normalizeOptionalText(value, maxLength) {
+  if (value == null || value === '') return null;
+  if (typeof value !== 'string') return false;
+  const trimmed = value.trim();
+  if (!trimmed) return null;
+  if (trimmed.length > maxLength) return false;
+  return trimmed;
+}
+
+function normalizeOptionalInteger(value, min, max) {
+  if (value == null || value === '') return null;
+  const numeric = Number(value);
+  if (!Number.isInteger(numeric) || numeric < min || numeric > max) return false;
+  return numeric;
+}
+
 function normalizeMessage(message) {
   if (typeof message !== 'string') return null;
   const trimmed = message.trim();
@@ -506,23 +575,26 @@ function normalizeImagePrompt(prompt) {
   return trimmed;
 }
 
-async function findVideoRecommendationForMessage(message, subject) {
+async function findVideoRecommendationForMessage(message, session) {
   if (!isVideoRequest(message)) return null;
 
-  const query = extractVideoSearchQuery(message, subject);
-  if (!query) {
+  const subject = session?.subject || 'General';
+  const grade = session?.grade || null;
+  const intent = buildVideoSearchIntent(message, subject, grade);
+  if (!intent.query) {
     return buildUnavailableVideoRecommendation(
       'lesson video',
       'Ask for a clear school topic, for example "photosynthesis" or "physical and chemical changes".',
-      subject
+      subject,
+      grade
     );
   }
 
   if (VIDEO_PROVIDER === 'youtube') {
-    return searchYoutubeVideoRecommendation(query, subject);
+    return searchYoutubeVideoRecommendation(intent, subject, grade);
   }
 
-  return buildUnavailableVideoRecommendation(query, 'Real-time video search provider is not configured.', subject);
+  return buildUnavailableVideoRecommendation(intent.topicText || intent.query, 'Real-time video search provider is not configured.', subject, grade);
 }
 
 function isVideoRequest(message) {
@@ -561,34 +633,20 @@ const VIDEO_STOP_WORDS = new Set([
   'best',
 ]);
 
-function extractVideoSearchQuery(message, subject) {
-  const normalized = normalizeSearchText(message);
-  const tokens = tokenizeSearchText(normalized)
-    .filter(token => !VIDEO_STOP_WORDS.has(token))
-    .filter(token => token.length > 1);
-
-  if (!tokens.length) return '';
-
-  const topic = tokens.join(' ');
-  const subjectHint = normalizeSearchText(subject);
-  return [topic, subjectHint, 'school lesson']
-    .filter(Boolean)
-    .join(' ');
-}
-
-async function searchYoutubeVideoRecommendation(query, subject) {
+async function searchYoutubeVideoRecommendation(intent, subject, grade) {
   if (!YOUTUBE_API_KEY) {
     return buildUnavailableVideoRecommendation(
-      query,
+      intent.topicText || intent.query,
       'YouTube real-time search is not configured yet. Add YOUTUBE_API_KEY to enable live video lookup.',
-      subject
+      subject,
+      grade
     );
   }
 
   try {
     const params = new URLSearchParams({
       part: 'snippet',
-      q: query,
+      q: intent.query,
       type: 'video',
       maxResults: String(VIDEO_SEARCH_MAX_RESULTS),
       safeSearch: 'strict',
@@ -607,37 +665,41 @@ async function searchYoutubeVideoRecommendation(query, subject) {
     const rawItems = Array.isArray(searchResult?.items) ? searchResult.items : [];
     const candidateItems = rawItems.filter(isUsableYoutubeSearchItem);
     const detailById = await loadYoutubeVideoDetails(candidateItems.map(item => item.id.videoId));
-    const videos = candidateItems
+    const candidateVideos = candidateItems
       .map(item => toRealtimeYoutubeVideo(item, detailById.get(item.id.videoId)))
       .filter(Boolean)
-      .filter(video => isTrustedVideoResult(video))
+      .filter(video => isTrustedVideoResult(video));
+    const videos = rankRealtimeVideos(candidateVideos, intent, {
+      trustedChannels: VIDEO_TRUSTED_CHANNELS,
+    })
       .slice(0, 2);
 
     if (!videos.length) {
       return buildUnavailableVideoRecommendation(
-        query,
+        intent.topicText || intent.query,
         VIDEO_TRUSTED_CHANNELS.length
-          ? 'No safe result from trusted education channels was found for this topic.'
-          : 'No safe education video result was found for this topic.',
-        subject
+          ? 'No safe result from trusted education channels matched this topic closely enough.'
+          : 'No safe education video result matched this topic closely enough.',
+        subject,
+        grade
       );
     }
 
     return {
       provider: 'youtube',
-      query,
+      query: intent.query,
       topic: {
-        topic: slugifyTopic(query),
-        label: toTitleCase(removeSearchSuffix(query, subject)),
+        topic: slugifyTopic(intent.topicText),
+        label: intent.topicLabel || toTitleCase(intent.topicText),
         subject: subject || 'General',
-        gradeLevel: null,
+        gradeLevel: grade || null,
         description: 'Real-time safe-search video recommendation from YouTube.',
       },
       videos,
     };
   } catch (err) {
     console.warn('[ai] real-time video search failed:', err.message);
-    return buildUnavailableVideoRecommendation(query, 'Real-time video search failed. Please try again.', subject);
+    return buildUnavailableVideoRecommendation(intent.topicText || intent.query, 'Real-time video search failed. Please try again.', subject, grade);
   }
 }
 
@@ -686,12 +748,14 @@ function toRealtimeYoutubeVideo(item, details) {
   const viewCount = Number(details?.statistics?.viewCount || 0);
   const title = decodeHtmlEntities(snippet.title);
   const source = decodeHtmlEntities(snippet.channelTitle);
+  const description = decodeHtmlEntities(snippet.description || '');
 
   return {
     id: `youtube-${videoId}`,
     providerVideoId: videoId,
     title,
     source,
+    description,
     sourceType: 'youtube_realtime',
     url: `https://www.youtube.com/watch?v=${encodeURIComponent(videoId)}`,
     thumbnailUrl: snippet.thumbnails?.medium?.url || snippet.thumbnails?.default?.url || null,
@@ -699,7 +763,7 @@ function toRealtimeYoutubeVideo(item, details) {
     viewCount,
     language: 'English',
     ageBand: 'school',
-    qualityScore: scoreRealtimeVideo({ source, viewCount, durationSeconds }),
+    qualityScore: 0,
     reviewStatus: 'provider_safe_search',
   };
 }
@@ -720,7 +784,7 @@ function scoreRealtimeVideo({ source, viewCount, durationSeconds }) {
   return Math.min(score, 100);
 }
 
-function buildUnavailableVideoRecommendation(query, reason, subject) {
+function buildUnavailableVideoRecommendation(query, reason, subject, grade = null) {
   return {
     provider: VIDEO_PROVIDER,
     query,
@@ -729,7 +793,7 @@ function buildUnavailableVideoRecommendation(query, reason, subject) {
       topic: slugifyTopic(query),
       label: toTitleCase(removeSearchSuffix(query, subject)),
       subject: subject || 'General',
-      gradeLevel: null,
+      gradeLevel: grade || null,
       description: 'Real-time video search did not return a safe result.',
     },
     videos: [],
@@ -755,15 +819,15 @@ function buildVideoRecommendationContent(recommendation) {
   const lines = [
     `I found safe real-time video results for ${recommendation.topic.label}.`,
     '',
-    `Best pick: ${primary.title} (${primary.source})`,
-    primary.url,
+    `Best pick: ${primary.title}`,
+    `Source: ${primary.source}`,
   ];
 
   if (secondary) {
-    lines.push('', `Also useful: ${secondary.title} (${secondary.source})`, secondary.url);
+    lines.push('', `Also useful: ${secondary.title}`, `Source: ${secondary.source}`);
   }
 
-  lines.push('', 'I added this recommendation to the Videos tab as well.');
+  lines.push('', 'Open the video card below. I also added this recommendation to the Videos tab.');
   return lines.join('\n');
 }
 
@@ -1216,6 +1280,11 @@ async function findOwnedSession(sessionId, studentId) {
       studentId: true,
       schoolId: true,
       subject: true,
+      board: true,
+      curriculum: true,
+      grade: true,
+      chapterNumber: true,
+      chapterName: true,
     },
   });
 }
@@ -1235,13 +1304,17 @@ async function loadRecentHistory(sessionId) {
   return messages.reverse();
 }
 
-async function retrieveRagChunks({ q, schoolId, subject, top }) {
+async function retrieveRagChunks({ q, schoolId, subject, board, curriculum, grade, chapterNumber, top }) {
   const params = new URLSearchParams({
     q,
     schoolId,
     subject,
     top: String(top),
   });
+  if (board) params.set('board', board);
+  if (curriculum) params.set('curriculum', curriculum);
+  if (grade) params.set('grade', String(grade));
+  if (chapterNumber) params.set('chapterNumber', String(chapterNumber));
 
   try {
     const response = await fetchJsonWithTimeout(
@@ -1266,7 +1339,7 @@ async function retrieveRagChunks({ q, schoolId, subject, top }) {
   }
 }
 
-function buildTutorPrompt({ chunks, history, question }) {
+function buildTutorPrompt({ chunks, history, question, session }) {
   const hasChunks = chunks.length > 0;
   const ragContext = hasChunks
     ? chunks.map((chunk, index) => `[${index + 1}] ${chunk.text} (source: ${chunk.source})`).join('\n\n')
@@ -1275,6 +1348,7 @@ function buildTutorPrompt({ chunks, history, question }) {
   const historyText = history.length
     ? history.map(message => `${message.role === 'user' ? 'User' : 'Assistant'}: ${message.content}`).join('\n')
     : 'No previous conversation.';
+  const lessonContext = formatLessonContextForPrompt(session);
 
   const noContextRule = hasChunks
     ? [
@@ -1284,25 +1358,31 @@ function buildTutorPrompt({ chunks, history, question }) {
       ].join('\n')
     : [
         '- No textbook context was retrieved yet, so answer only if this is a normal school-learning question.',
-        '- Use brief, age-appropriate general curriculum knowledge for school topics.',
+        '- Use age-appropriate general curriculum knowledge for school topics.',
         '- If the question is not a school-learning question or you are unsure, say: "I do not have information on that yet."',
       ].join('\n');
 
   return `You are Roognis, an AI tutor for school students.
 Rules:
 ${noContextRule}
-- Be concise, friendly, and use simple language suitable for school students.
+- Be clear, useful, and respectful. Do not sound babyish.
+- Match the student's level when they mention a grade or class. If no grade is given, assume middle-school to early high-school depth.
+- Use correct academic terms, then explain them in plain language.
 - Never make up facts.
-- Use short paragraphs, numbered steps, and simple bullet lists when useful.
+- Use short paragraphs, numbered steps, and bullet lists when useful.
 - Do not show raw Markdown symbols such as **bold**, leading asterisks, or LaTeX dollar signs.
-- Teach like a patient school tutor, not like a textbook.
+- Teach like a strong school tutor: practical, accurate, and easy to revise from.
 - For concept questions, use this flow:
-  1. Start with the idea in one simple sentence.
-  2. Give one relatable "imagine this" example from daily life or school.
-  3. Walk through one worked example step by step.
-  4. End with one small "Try this" practice question.
-  5. Ask if the student wants a hint or another example.
+  1. Start with a direct answer in 1 to 2 sentences.
+  2. Explain the important idea or formula, including what each term means.
+  3. Give a concrete example or worked example.
+  4. Add a common mistake or exam tip when it helps.
+  5. End with one short practice question only when it is useful.
 - Keep the answer easy to scan. Avoid long paragraphs.
+- For one-word or unclear questions, ask one focused follow-up instead of giving a childish generic answer.
+
+Lesson context:
+${lessonContext}
 
 Context:
 ${ragContext}
@@ -1312,6 +1392,18 @@ ${historyText}
 
 Student question:
 ${question}`;
+}
+
+function formatLessonContextForPrompt(session) {
+  const parts = [
+    session?.subject ? `Subject: ${session.subject}` : null,
+    session?.grade ? `Grade: ${session.grade}` : null,
+    session?.chapterNumber ? `Chapter: ${session.chapterNumber}` : null,
+    session?.chapterName ? `Chapter name: ${session.chapterName}` : null,
+    session?.board ? `Board: ${session.board}` : null,
+    session?.curriculum ? `Curriculum: ${session.curriculum}` : null,
+  ].filter(Boolean);
+  return parts.length ? parts.join('\n') : 'No explicit lesson context was selected.';
 }
 
 function setSseHeaders(res) {

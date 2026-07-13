@@ -40,6 +40,7 @@ services:
     restart: unless-stopped
 
   chromadb:
+    profiles: ["local-ai"]
     image: chromadb/chroma:latest
     volumes:
       - chroma_data:/chroma/chroma
@@ -47,6 +48,7 @@ services:
 
   # ── AI Layer ─────────────────────────────────────────────────────────────────
   ollama:
+    profiles: ["local-ai"]
     image: ollama/ollama:latest
     volumes:
       - ollama_models:/root/.ollama
@@ -165,6 +167,7 @@ services:
       JWT_SECRET: ${JWT_SECRET}
       FILE_STORAGE_PATH: /app/storage
       PORT: 3003
+      RAG_TEST_MODE: ${RAG_TEST_MODE:-true}
       RAG_COLLECTION_PREFIX: ${RAG_COLLECTION_PREFIX:-school}
       RAG_MAX_UPLOAD_MB: ${RAG_MAX_UPLOAD_MB:-50}
       # Cloud swap — set to use Pinecone instead of ChromaDB
@@ -175,10 +178,6 @@ services:
       - ./seed-data:/app/seed-data:ro
     depends_on:
       postgres:
-        condition: service_healthy
-      chromadb:
-        condition: service_started
-      ollama:
         condition: service_healthy
     labels:
       - "traefik.enable=true"
@@ -200,6 +199,7 @@ services:
       INTERNAL_SERVICE_TOKEN: ${INTERNAL_SERVICE_TOKEN}
       PORT: 3004
       NODE_ENV: production
+      NODE_TLS_REJECT_UNAUTHORIZED: "0"
     depends_on:
       postgres:
         condition: service_healthy

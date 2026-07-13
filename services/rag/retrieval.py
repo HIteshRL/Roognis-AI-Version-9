@@ -6,8 +6,6 @@ import re
 from dataclasses import dataclass
 from urllib.parse import urlparse
 
-import chromadb
-import ollama
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
@@ -53,12 +51,16 @@ class VectorRetrievalClient:
 
     def _get_ollama_client(self):
         if self._ollama_client is None:
+            import ollama
+
             self._ollama_client = ollama.Client(host=self.settings.ollama_url)
         return self._ollama_client
 
     def _get_chroma_client(self):
         if self._chroma_client is not None:
             return self._chroma_client
+        import chromadb
+
         parsed = urlparse(self.settings.chroma_url)
         host = parsed.hostname or self.settings.chroma_url
         port = parsed.port or (443 if parsed.scheme == "https" else 8000)

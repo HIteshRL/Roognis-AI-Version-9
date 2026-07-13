@@ -14,12 +14,18 @@ model ChatSession {
   studentId String   @map("student_id") @db.Uuid
   schoolId  String   @map("school_id") @db.Uuid
   subject   String   @db.VarChar(80)
+  board     String?  @db.VarChar(40)
+  curriculum String? @db.VarChar(80)
+  grade     Int?
+  chapterNumber Int? @map("chapter_number")
+  chapterName String? @map("chapter_name") @db.VarChar(160)
   createdAt DateTime @default(now()) @map("created_at")
 
   messages Message[]
 
   @@index([studentId, createdAt])
   @@index([schoolId, subject])
+  @@index([schoolId, subject, grade, chapterNumber])
   @@map("chat_sessions")
   @@schema("ai_db")
 }
