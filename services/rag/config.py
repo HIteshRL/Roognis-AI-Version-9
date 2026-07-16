@@ -46,6 +46,14 @@ class Settings(BaseSettings):
         False,
         description="Enables lightweight test defaults for pytest/TestClient runs.",
     )
+    quiz_service_url: str = Field(
+        "",
+        description="Quiz Service base URL used for chapter-ready notifications.",
+    )
+    internal_service_token: str = Field(
+        "",
+        description="Shared service-to-service token for internal RAG/Quiz calls.",
+    )
 
     model_config = SettingsConfigDict(
         env_file=".env",

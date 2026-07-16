@@ -17,6 +17,7 @@ const KNOWN_EVENT_TYPES = [
   'lesson_started',
   'lesson_completed',
   'quiz_draft_created',
+  'quiz_draft_generation_failed',
   'quiz_published',
   'quiz_opened',
   'quiz_submitted',

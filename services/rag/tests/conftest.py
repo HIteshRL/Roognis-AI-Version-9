@@ -12,6 +12,7 @@ os.environ.setdefault("FILE_STORAGE_PATH", str(Path(tempfile.gettempdir()) / "ro
 os.environ.setdefault("JWT_SECRET", "test-rag-secret-with-enough-length")
 os.environ.setdefault("RAG_DB_SCHEMA", "")
 os.environ.setdefault("RAG_TEST_MODE", "true")
+os.environ.setdefault("INTERNAL_SERVICE_TOKEN", "test-internal-token")
 
 from main import app
 from database import Base, engine

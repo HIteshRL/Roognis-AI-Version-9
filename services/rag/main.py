@@ -14,17 +14,22 @@
 # DB schema: rag_db — documents table (SQLAlchemy, not Prisma)
 # ─────────────────────────────────────────────────────────────────────────────
 
+import hashlib
+import json
+import logging
 import os
 import re
 from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Annotated
+from urllib import request as urlrequest
+from urllib.error import URLError
 
 from fastapi import Depends, FastAPI, File, Form, HTTPException, Query, UploadFile, status
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
-from auth import AuthUser, get_current_user, require_teacher
+from auth import AuthUser, get_current_user, require_internal_token, require_teacher
 from chunking import generate_chunks_and_embeddings
 from config import Settings, get_settings
 from database import get_db, init_db
@@ -38,6 +43,8 @@ from models import (
     RetrievalChunk,
 )
 from retrieval import RetrievalFilters, retrieve_chunks
+
+logger = logging.getLogger(__name__)
 
 
 @asynccontextmanager
@@ -172,6 +179,7 @@ def upload_document(
 
     db.commit()
     db.refresh(document)
+    notify_quiz_service_chapter_ready(db, document, settings)
 
     return {
         "documentId": document.id,
@@ -222,6 +230,315 @@ def list_documents(
     return {
         "documents": [document_summary(db, document) for document in documents]
     }
+
+
+@app.get("/api/rag/internal/chapters")
+def list_internal_chapters(
+    schoolId: Annotated[str | None, Query()] = None,
+    subject: Annotated[str | None, Query()] = None,
+    grade: Annotated[int | None, Query(ge=1, le=12)] = None,
+    _internal: None = Depends(require_internal_token),
+    db: Session = Depends(get_db),
+):
+    query = select(Document).where(Document.status == DocumentStatus.READY.value)
+    if schoolId:
+        query = query.where(Document.school_id == schoolId.strip())
+    if subject:
+        query = query.where(func.lower(Document.subject) == subject.strip().lower())
+    if grade is not None:
+        query = query.where(Document.grade == grade)
+
+    documents = db.scalars(
+        query.order_by(
+            Document.school_id.asc(),
+            Document.subject.asc(),
+            Document.grade.asc(),
+            Document.chapter_number.asc(),
+            Document.created_at.asc(),
+        )
+    ).all()
+
+    grouped: dict[tuple, list[Document]] = {}
+    for document in documents:
+        grouped.setdefault(chapter_identity_key(document), []).append(document)
+
+    chapters = [
+        chapter_group_summary(db, group_documents)
+        for group_documents in grouped.values()
+        if group_documents
+    ]
+    chapters.sort(
+        key=lambda item: (
+            item["schoolId"],
+            item["subject"].lower(),
+            item["grade"],
+            item["chapterNumber"],
+            item["chapterName"].lower(),
+        )
+    )
+    return {"chapters": chapters}
+
+
+@app.get("/api/rag/internal/chapter-context")
+def internal_chapter_context(
+    documentIds: Annotated[str | None, Query()] = None,
+    schoolId: Annotated[str | None, Query()] = None,
+    board: Annotated[str | None, Query()] = None,
+    curriculum: Annotated[str | None, Query()] = None,
+    grade: Annotated[int | None, Query(ge=1, le=12)] = None,
+    subject: Annotated[str | None, Query()] = None,
+    book: Annotated[str | None, Query()] = None,
+    chapterNumber: Annotated[int | None, Query(ge=1)] = None,
+    language: Annotated[str | None, Query()] = None,
+    edition: Annotated[str | None, Query()] = None,
+    maxChunks: Annotated[int, Query(ge=1, le=120)] = 80,
+    _internal: None = Depends(require_internal_token),
+    db: Session = Depends(get_db),
+):
+    documents = find_context_documents(
+        db,
+        document_ids=parse_document_ids(documentIds),
+        school_id=schoolId,
+        board=board,
+        curriculum=curriculum,
+        grade=grade,
+        subject=subject,
+        book=book,
+        chapter_number=chapterNumber,
+        language=language,
+        edition=edition,
+    )
+    if not documents:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Ready chapter context not found.")
+
+    document_ids = [document.id for document in documents]
+    chunks = db.scalars(
+        select(RetrievalChunk)
+        .where(RetrievalChunk.document_id.in_(document_ids))
+        .order_by(
+            RetrievalChunk.pedagogical_order.asc().nullslast(),
+            RetrievalChunk.document_id.asc(),
+            RetrievalChunk.chunk_index.asc(),
+        )
+        .limit(maxChunks)
+    ).all()
+    entities = db.scalars(
+        select(EducationalEntity)
+        .where(EducationalEntity.document_id.in_(document_ids))
+        .order_by(EducationalEntity.created_at.asc(), EducationalEntity.id.asc())
+        .limit(160)
+    ).all()
+
+    return {
+        "chapter": chapter_group_summary(db, documents),
+        "chunks": [chunk_context_item(chunk) for chunk in chunks],
+        "entities": [entity_context_item(entity) for entity in entities],
+    }
+
+
+def chapter_identity_key(document: Document) -> tuple:
+    return (
+        document.school_id,
+        document.board.casefold(),
+        document.curriculum.casefold(),
+        document.grade,
+        document.subject.casefold(),
+        document.book.casefold(),
+        document.chapter_number,
+        document.language.casefold(),
+        document.edition.casefold(),
+    )
+
+
+def chapter_group_summary(db: Session, documents: list[Document]) -> dict:
+    representative = documents[0]
+    document_ids = [document.id for document in documents]
+    entity_count = db.scalar(
+        select(func.count())
+        .select_from(EducationalEntity)
+        .where(EducationalEntity.document_id.in_(document_ids))
+    ) or 0
+    chunk_count = db.scalar(
+        select(func.count())
+        .select_from(RetrievalChunk)
+        .where(RetrievalChunk.document_id.in_(document_ids))
+    ) or 0
+
+    return {
+        "schoolId": representative.school_id,
+        "board": representative.board,
+        "curriculum": representative.curriculum,
+        "grade": representative.grade,
+        "subject": representative.subject,
+        "book": representative.book,
+        "chapterNumber": representative.chapter_number,
+        "chapterName": representative.chapter_name,
+        "language": representative.language,
+        "edition": representative.edition,
+        "documentIds": document_ids,
+        "documentCount": len(documents),
+        "entityCount": entity_count,
+        "chunkCount": chunk_count,
+        "status": DocumentStatus.READY.value,
+        "contentFingerprint": chapter_content_fingerprint(db, document_ids),
+        "updatedAt": isoformat_or_none(max((document.updated_at for document in documents if document.updated_at), default=None)),
+    }
+
+
+def chapter_content_fingerprint(db: Session, document_ids: list[str]) -> str:
+    chunks = db.scalars(
+        select(RetrievalChunk)
+        .where(RetrievalChunk.document_id.in_(document_ids))
+        .order_by(RetrievalChunk.document_id.asc(), RetrievalChunk.chunk_index.asc())
+    ).all()
+    digest = hashlib.sha256()
+    for chunk in chunks:
+        digest.update(chunk.document_id.encode("utf-8"))
+        digest.update(b"\0")
+        digest.update(str(chunk.chunk_index).encode("utf-8"))
+        digest.update(b"\0")
+        digest.update((chunk.text or "").encode("utf-8"))
+        digest.update(b"\0")
+        digest.update((chunk.source or "").encode("utf-8"))
+        digest.update(b"\0")
+    return digest.hexdigest()
+
+
+def parse_document_ids(value: str | None) -> list[str]:
+    if not value:
+        return []
+    return [item.strip() for item in value.split(",") if item.strip()]
+
+
+def find_context_documents(
+    db: Session,
+    *,
+    document_ids: list[str],
+    school_id: str | None,
+    board: str | None,
+    curriculum: str | None,
+    grade: int | None,
+    subject: str | None,
+    book: str | None,
+    chapter_number: int | None,
+    language: str | None,
+    edition: str | None,
+) -> list[Document]:
+    query = select(Document).where(Document.status == DocumentStatus.READY.value)
+    if document_ids:
+        query = query.where(Document.id.in_(document_ids))
+    else:
+        if not (school_id and subject and grade and chapter_number):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="documentIds or schoolId, subject, grade, and chapterNumber are required.",
+            )
+        query = query.where(
+            Document.school_id == school_id.strip(),
+            func.lower(Document.subject) == subject.strip().lower(),
+            Document.grade == grade,
+            Document.chapter_number == chapter_number,
+        )
+        if board:
+            query = query.where(func.lower(Document.board) == board.strip().lower())
+        if curriculum:
+            query = query.where(func.lower(Document.curriculum) == curriculum.strip().lower())
+        if book:
+            query = query.where(func.lower(Document.book) == book.strip().lower())
+        if language:
+            query = query.where(func.lower(Document.language) == language.strip().lower())
+        if edition:
+            query = query.where(func.lower(Document.edition) == edition.strip().lower())
+
+    return db.scalars(query.order_by(Document.created_at.asc())).all()
+
+
+def chunk_context_item(chunk: RetrievalChunk) -> dict:
+    metadata = chunk.metadata_json or {}
+    return {
+        "chunkId": chunk.id,
+        "documentId": chunk.document_id,
+        "entityId": chunk.entity_id,
+        "canonicalConceptId": chunk.canonical_concept_id,
+        "chunkIndex": chunk.chunk_index,
+        "chunkType": chunk.chunk_type,
+        "text": chunk.text,
+        "source": chunk.source,
+        "sourcePage": chunk.source_page,
+        "pageStart": chunk.page_start,
+        "pageEnd": chunk.page_end,
+        "pedagogicalOrder": chunk.pedagogical_order,
+        "tokenCount": chunk.token_count,
+        "metadata": {
+            "entityType": metadata.get("entityType"),
+            "section": metadata.get("section"),
+            "chapterName": chunk.chapter_name,
+            "chapterNumber": chunk.chapter_number,
+            "subject": chunk.subject,
+            "grade": chunk.grade,
+        },
+    }
+
+
+def entity_context_item(entity: EducationalEntity) -> dict:
+    metadata = entity.metadata_json or {}
+    return {
+        "entityId": entity.id,
+        "entityType": entity.entity_type,
+        "canonicalConceptId": entity.canonical_concept_id,
+        "title": entity.title,
+        "summary": entity.summary,
+        "section": metadata.get("section"),
+        "pageStart": metadata.get("pageStart"),
+        "pageEnd": metadata.get("pageEnd"),
+        "objectKind": metadata.get("objectKind"),
+    }
+
+
+def notify_quiz_service_chapter_ready(db: Session, document: Document, settings: Settings) -> None:
+    if not settings.quiz_service_url or not settings.internal_service_token:
+        return
+    try:
+        payload = {
+            "chapter": chapter_group_summary(
+                db,
+                [group_document for group_document in sibling_ready_chapter_documents(db, document)],
+            ),
+            "trigger": "rag_upload_ready",
+        }
+        request_body = json.dumps(payload).encode("utf-8")
+        endpoint = f"{settings.quiz_service_url.rstrip('/')}/api/quiz/internal/chapter-ready"
+        req = urlrequest.Request(
+            endpoint,
+            data=request_body,
+            method="POST",
+            headers={
+                "Content-Type": "application/json",
+                "X-Internal-Service-Token": settings.internal_service_token,
+            },
+        )
+        with urlrequest.urlopen(req, timeout=3) as response:
+            if response.status >= 300:
+                logger.warning("Quiz chapter-ready notification returned status %s", response.status)
+    except (OSError, URLError, ValueError) as exc:
+        logger.warning("Quiz chapter-ready notification failed: %s", exc)
+
+
+def sibling_ready_chapter_documents(db: Session, document: Document) -> list[Document]:
+    return db.scalars(
+        select(Document).where(
+            Document.status == DocumentStatus.READY.value,
+            Document.school_id == document.school_id,
+            func.lower(Document.board) == document.board.lower(),
+            func.lower(Document.curriculum) == document.curriculum.lower(),
+            Document.grade == document.grade,
+            func.lower(Document.subject) == document.subject.lower(),
+            func.lower(Document.book) == document.book.lower(),
+            Document.chapter_number == document.chapter_number,
+            func.lower(Document.language) == document.language.lower(),
+            func.lower(Document.edition) == document.edition.lower(),
+        )
+    ).all()
 
 
 def validate_pdf_upload(file: UploadFile) -> None:
