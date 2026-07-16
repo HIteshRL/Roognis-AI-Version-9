@@ -15,15 +15,17 @@ Browser
         ├── /api/ai        → AI Service        :3002  (Node.js + Prisma)
         ├── /api/rag       → RAG Service       :3003  (Python + FastAPI)
         ├── /api/analytics → Analytics Service :3004  (Node.js + Prisma)
-        └── /              → Frontend          :3000  (Next.js)
+        ├── /api/quiz      → Quiz Service      :3005  (Node.js + Prisma)
+        └── /              → Frontend          :3000  (Node static server)
 
 Data Layer
-  ├── PostgreSQL :5432     — 4 isolated schemas (auth_db, ai_db, rag_db, analytics_db)
+  ├── PostgreSQL :5432     — isolated schemas (auth_db, ai_db, rag_db, quiz_db, analytics_db)
   ├── ChromaDB   :8000     — Vector store for NCERT PDF embeddings
   └── Docker Volume        — /data (PDFs, generated images, seed videos)
 
 AI Layer
   ├── Gemini API          — default MVP provider for chat + image generation
+  ├── OpenRouter API       — OpenAI-family structured chapter quiz generation
   ├── Ollama     :11434   — optional local fallback for text chat
   └── ComfyUI    :8188    — optional local fallback for image generation
 ```
@@ -116,7 +118,7 @@ parent_student  — parent_id, student_id  (composite PK, idempotent linking)
 
 ### Infrastructure
 
-**`docker-compose.yml`** — 10-service orchestration covering the full stack. The default MVP path uses Gemini, so Ollama and ComfyUI are behind the optional `local-ai` profile.
+**`docker-compose.yml`** — full-stack orchestration. The default MVP path uses hosted providers and deterministic RAG test-mode embeddings, so Ollama, ChromaDB, and ComfyUI are behind the optional `local-ai` profile.
 
 **`traefik/traefik.yml`** — API gateway config. Routes requests by path prefix to the correct service. CORS configured for `localhost:3000`. Dashboard available at `http://localhost:8080`.
 
@@ -134,7 +136,8 @@ parent_student  — parent_id, student_id  (composite PK, idempotent linking)
 
 - Docker Desktop or Docker + `docker-compose`
 - Gemini API key for MVP chat and image generation
-- Disk space for the Ollama embedding model used by RAG ingestion; more disk space if using optional ComfyUI image fallback
+- OpenRouter API key for OpenAI-family chapter quiz generation
+- Extra disk space only if using optional local Ollama/Chroma or ComfyUI fallback profiles
 
 ### 1. Configure environment
 
@@ -151,6 +154,10 @@ IMAGE_PROVIDER=gemini
 GEMINI_API_KEY=<your Gemini API key>
 GEMINI_TEXT_MODEL=<your Gemini text model>
 GEMINI_IMAGE_MODEL=gemini-3.1-flash-image
+OPENROUTER_API_KEY=<your OpenRouter API key>
+OPENROUTER_QUIZ_MODEL=openai/gpt-5-mini
+OPENROUTER_QUIZ_REASONING_EFFORT=low
+QUIZ_QUESTION_COUNT=10
 ```
 
 Child-safety behavior is enforced inside the AI Service. Chat requests are checked before RAG/Gemini, Gemini chat uses strict safety settings, model text is validated before the service streams SSE chunks to the browser, and image prompts are limited to safe educational diagram requests.
@@ -165,7 +172,7 @@ sh scripts/comfyui-model-download.sh
 
 ### 3. Start the full stack
 
-Default Gemini MVP startup starts Ollama for RAG embeddings and ChromaDB for vector storage. ComfyUI remains behind the optional `local-ai` profile.
+Default Gemini MVP startup keeps local AI infrastructure off. RAG uses deterministic test-mode embeddings unless you explicitly run the `local-ai` profile.
 
 ```sh
 docker-compose up --build
@@ -192,7 +199,7 @@ Log in with any demo account. The browser will redirect you to the correct dashb
 
 ## EKE Ingestion Setup and Verification
 
-The RAG service now includes the Educational Knowledge Engine ingestion path. Teachers can upload textbook PDFs, the service persists document/job lifecycle rows in `rag_db`, extracts educational entities, generates retrieval chunks, embeds them with Ollama, stores vectors in ChromaDB, and serves AI-compatible retrieval chunks back to the AI service.
+The RAG service now includes the Educational Knowledge Engine ingestion path. Teachers can upload textbook PDFs, the service persists document/job lifecycle rows in `rag_db`, extracts educational entities, generates retrieval chunks, stores retrieval metadata, and serves AI-compatible chunks back to the AI service. Local demo defaults use deterministic embeddings with `RAG_TEST_MODE=true`; switch on the `local-ai` profile only when you want Chroma/Ollama vector retrieval.
 
 ### RAG/EKE environment variables
 
@@ -209,9 +216,11 @@ Docker Compose sets the runtime defaults for local development. Override these o
 | `FILE_STORAGE_PATH` | `/app/storage` | Shared volume path for uploaded PDFs |
 | `RAG_MAX_UPLOAD_MB` | `50` | Maximum PDF upload size |
 | `RAG_COLLECTION_PREFIX` | `school` | Prefix for per-school/per-subject Chroma collections |
-| `RAG_TEST_MODE` | `false` | Test-only deterministic embedding mode used by pytest |
+| `RAG_TEST_MODE` | `true` | Deterministic local demo/test embeddings; set `false` with `local-ai` vector infrastructure |
+| `QUIZ_SERVICE_URL` | `http://quiz:3005` | Optional chapter-ready notification target after ingestion |
+| `INTERNAL_SERVICE_TOKEN` | from `.env` | Protects service-to-service RAG/Quiz calls |
 
-For local EKE ingestion, make sure the embedding service is available. The default stack starts ChromaDB and Ollama; the bundled Ollama init script pulls `nomic-embed-text` idempotently before RAG starts:
+For full local vector retrieval, explicitly run the local AI profile. The bundled Ollama init script pulls `nomic-embed-text` idempotently before RAG starts:
 
 ```sh
 LLM_PROVIDER=ollama IMAGE_PROVIDER=comfyui docker-compose --profile local-ai up --build
@@ -295,6 +304,66 @@ Manual verification:
 
 ---
 
+## Chapter Quiz Generation Setup and Verification
+
+The Quiz Service owns automatic chapter quiz generation. RAG reports ready chapters and chapter context, AI drafts structured quiz JSON through OpenRouter using OpenAI-family model slugs only, and Quiz persists one ready quiz per chapter content fingerprint.
+
+### Quiz environment variables
+
+| Variable | Purpose |
+|---|---|
+| `OPENROUTER_API_KEY` | Required for OpenRouter quiz draft generation |
+| `OPENROUTER_API_BASE_URL` | OpenRouter API base URL, default `https://openrouter.ai/api/v1` |
+| `OPENROUTER_QUIZ_MODEL` | OpenRouter OpenAI-family quiz model, default `openai/gpt-5-mini` |
+| `OPENROUTER_QUIZ_REASONING_EFFORT` | OpenRouter chat-completions reasoning effort, default `low` |
+| `OPENROUTER_QUIZ_TIMEOUT_MS` | AI draft request timeout |
+| `OPENROUTER_QUIZ_MAX_COMPLETION_TOKENS` | Maximum generated tokens for the structured quiz draft |
+| `OPENROUTER_SITE_URL` | Optional OpenRouter attribution header |
+| `OPENROUTER_APP_NAME` | Optional OpenRouter attribution title, default `Roognis` |
+| `QUIZ_QUESTION_COUNT` | Default number of questions per chapter, default `10` |
+| `QUIZ_SERVICE_URL` | RAG notification target, default `http://quiz:3005` |
+| `INTERNAL_SERVICE_TOKEN` | Protects RAG -> Quiz and Quiz -> AI/RAG calls |
+
+### Frontend teacher flow
+
+1. Log in as `teacher@demo.com`.
+2. Upload chapter PDFs in `Ingestion`.
+3. Open `Quizzes`.
+4. Click `Generate missing` to backfill quizzes for already-ready chapters.
+5. Review ready quizzes by chapter; each quiz shows simple/medium/hard counts, answers, explanations, weak-area tags, and source coverage.
+
+### Curl examples
+
+```sh
+# Backfill all ready chapters for the signed-in teacher's school
+curl -s -b /tmp/roognis-teacher-cookies.txt -X POST http://localhost/api/quiz/backfill -H "Content-Type: application/json" -d '{}'
+
+# List chapter quiz generation state
+curl -s -b /tmp/roognis-teacher-cookies.txt http://localhost/api/quiz/chapters
+
+# Review a ready quiz with answers; replace QUIZ_ID
+curl -s -b /tmp/roognis-teacher-cookies.txt http://localhost/api/quiz/QUIZ_ID
+```
+
+### Verification steps
+
+```sh
+npm test --prefix services/quiz
+npm test --prefix services/ai
+python -m pytest services/rag/tests
+node -e "const fs=require('fs'); const html=fs.readFileSync('frontend/index.html','utf8'); const m=html.match(/<script>([\\s\\S]*)<\\/script>/); if(!m) throw new Error('script not found'); new Function(m[1]); console.log('inline script ok');"
+```
+
+Manual checks:
+
+- A ready RAG upload notifies Quiz when `QUIZ_SERVICE_URL` and `INTERNAL_SERVICE_TOKEN` are configured.
+- `POST /api/quiz/backfill` discovers existing ready chapters and queues missing quizzes.
+- A generated quiz has exactly 50% simple, 30% medium, and 20% hard questions for the configured count.
+- Teacher quiz detail includes answers/explanations; student quiz detail hides them.
+- Generation failures appear on the teacher quiz workspace with retry controls.
+
+---
+
 ## Team Handoff Guide
 
 This section is for team members implementing the remaining services.
@@ -318,7 +387,9 @@ GEMINI_TEXT_MODEL=<from .env>
 GEMINI_IMAGE_MODEL=<from .env>
 OLLAMA_URL=http://ollama:11434        # optional fallback
 RAG_SERVICE_URL=http://rag:3003
+QUIZ_SERVICE_URL=http://quiz:3005
 ANALYTICS_URL=http://analytics:3004
+AI_SERVICE_URL=http://ai:3002
 COMFYUI_URL=http://comfyui:8188       # optional fallback
 
 # File storage
@@ -368,8 +439,28 @@ Implemented endpoints:
 | `GET` | `/api/rag/upload/:docId/status` | Teacher JWT | Poll document/job lifecycle status |
 | `GET` | `/api/rag/documents` | Teacher JWT | List school-scoped uploaded documents |
 | `GET` | `/api/rag/retrieve` | None | Return AI-compatible `{ chunks }` with `text`, `source`, and `score` |
+| `GET` | `/api/rag/internal/chapters` | Internal token | List ready chapter groups for Quiz Service |
+| `GET` | `/api/rag/internal/chapter-context` | Internal token | Return ordered chunks/entities for one ready chapter |
 
-The retrieve endpoint is called internally by the AI Service without JWT. Document management remains teacher-only and school-scoped.
+The retrieve endpoint is called internally by the AI Service without JWT. Document management remains teacher-only and school-scoped. Quiz orchestration uses internal-token RAG context endpoints.
+
+### Quiz Service — Current Surface
+
+**Files:** `services/quiz/server.js`, `services/quiz/lib/generation.js`, `services/quiz/prisma/schema.prisma`
+
+**Schema:** `quiz_db` — chapter sources, generation jobs, quizzes, and quiz questions
+
+Implemented endpoints:
+
+| Method | Path | Auth | Description |
+|---|---|---|---|
+| `POST` | `/api/quiz/internal/chapter-ready` | Internal token | Upsert ready chapter source and queue generation |
+| `POST` | `/api/quiz/backfill` | Teacher JWT | Discover ready RAG chapters and queue missing quizzes |
+| `GET` | `/api/quiz/chapters` | Teacher JWT | List chapter quiz generation status |
+| `POST` | `/api/quiz/sources/:sourceId/generate` | Teacher JWT | Retry/generate one chapter quiz |
+| `GET` | `/api/quiz/:quizId` | Teacher JWT | Review quiz with answers and explanations |
+| `GET` | `/api/quiz/student/chapters` | Student JWT | List ready quizzes without answers |
+| `GET` | `/api/quiz/student/quizzes/:quizId` | Student JWT | Open a ready quiz without answers |
 
 Detailed contract: `docs/backend-services/RAG_EKE_INGESTION_CONTRACT.md`.
 
@@ -525,10 +616,11 @@ roognis/
 │   │   ├── routes/auth.routes.js
 │   │   ├── prisma/schema.prisma
 │   │   └── scripts/seed.js
-│   ├── ai/                         🔧 Stub — implement per LLD v3
+│   ├── ai/                         Complete — tutor, media, safety, and GPT-5 quiz drafts
 │   ├── rag/                        Complete — RAG/EKE ingestion and retrieval
-│   └── analytics/                  🔧 Stub — implement per LLD v3
-├── frontend/                       MVP single-page app with teacher ingestion
+│   ├── quiz/                       Complete — chapter quiz generation and review
+│   └── analytics/                  Complete — learning events and dashboards
+├── frontend/                       MVP single-page app with teacher ingestion and quiz review
 └── kubernetes/                     — Production K8s manifests
     ├── kustomization.yaml
     ├── namespace.yaml

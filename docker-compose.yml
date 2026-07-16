@@ -124,6 +124,14 @@ services:
       GEMINI_API_KEY: ${GEMINI_API_KEY:-}
       GEMINI_TEXT_MODEL: ${GEMINI_TEXT_MODEL:-gemini-3.1-flash-lite}
       GEMINI_IMAGE_MODEL: ${GEMINI_IMAGE_MODEL:-gemini-3.1-flash-image}
+      OPENROUTER_API_KEY: ${OPENROUTER_API_KEY:-}
+      OPENROUTER_API_BASE_URL: ${OPENROUTER_API_BASE_URL:-https://openrouter.ai/api/v1}
+      OPENROUTER_QUIZ_MODEL: ${OPENROUTER_QUIZ_MODEL:-openai/gpt-5-mini}
+      OPENROUTER_QUIZ_REASONING_EFFORT: ${OPENROUTER_QUIZ_REASONING_EFFORT:-low}
+      OPENROUTER_QUIZ_TIMEOUT_MS: ${OPENROUTER_QUIZ_TIMEOUT_MS:-60000}
+      OPENROUTER_QUIZ_MAX_COMPLETION_TOKENS: ${OPENROUTER_QUIZ_MAX_COMPLETION_TOKENS:-4200}
+      OPENROUTER_SITE_URL: ${OPENROUTER_SITE_URL:-}
+      OPENROUTER_APP_NAME: ${OPENROUTER_APP_NAME:-Roognis}
       VIDEO_PROVIDER: ${VIDEO_PROVIDER:-youtube}
       YOUTUBE_API_KEY: ${YOUTUBE_API_KEY:-}
       VIDEO_SEARCH_MAX_RESULTS: ${VIDEO_SEARCH_MAX_RESULTS:-5}
@@ -173,6 +181,8 @@ services:
       RAG_TEST_MODE: ${RAG_TEST_MODE:-true}
       RAG_COLLECTION_PREFIX: ${RAG_COLLECTION_PREFIX:-school}
       RAG_MAX_UPLOAD_MB: ${RAG_MAX_UPLOAD_MB:-50}
+      QUIZ_SERVICE_URL: "http://quiz:3005"
+      INTERNAL_SERVICE_TOKEN: ${INTERNAL_SERVICE_TOKEN}
       # Cloud swap — set to use Pinecone instead of ChromaDB
       PINECONE_API_KEY: ${PINECONE_API_KEY:-}
       PINECONE_ENV: ${PINECONE_ENV:-}
@@ -188,6 +198,40 @@ services:
       - "traefik.http.routers.rag.entrypoints=web"
       - "traefik.http.services.rag.loadbalancer.server.port=3003"
       - "traefik.http.routers.rag.middlewares=cors@file"
+    restart: unless-stopped
+
+  quiz:
+    build: ./services/quiz
+    ports:
+      - "3005:3005"
+    command: >
+      sh -c "[ -f prisma/schema.prisma ] &&
+             npx prisma db push --schema=prisma/schema.prisma ||
+             true && node server.js"
+    environment:
+      DATABASE_URL: "postgresql://postgres:${DB_PASSWORD}@postgres:5432/roognis?schema=quiz_db"
+      JWT_SECRET: ${JWT_SECRET}
+      INTERNAL_SERVICE_TOKEN: ${INTERNAL_SERVICE_TOKEN}
+      RAG_SERVICE_URL: "http://rag:3003"
+      AI_SERVICE_URL: "http://ai:3002"
+      ANALYTICS_URL: "http://analytics:3004"
+      QUIZ_QUESTION_COUNT: ${QUIZ_QUESTION_COUNT:-10}
+      PORT: 3005
+      NODE_ENV: production
+      NODE_TLS_REJECT_UNAUTHORIZED: "0"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      rag:
+        condition: service_started
+      ai:
+        condition: service_started
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.quiz.rule=PathPrefix(`/api/quiz`)"
+      - "traefik.http.routers.quiz.entrypoints=web"
+      - "traefik.http.services.quiz.loadbalancer.server.port=3005"
+      - "traefik.http.routers.quiz.middlewares=cors@file"
     restart: unless-stopped
 
   analytics:
@@ -216,6 +260,8 @@ services:
 
   frontend:
     build: ./frontend
+    ports:
+      - "3000:3000"
     environment:
       NEXT_PUBLIC_API_URL: "http://localhost/api"
       API_PROXY_TARGET: "http://traefik"

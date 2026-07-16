@@ -16,6 +16,10 @@ const {
   buildVideoSearchIntent,
   rankRealtimeVideos,
 } = require('./video-search');
+const {
+  generateQuizDraft,
+  normalizeQuizDraftRequest,
+} = require('./quiz-draft');
 
 const app = express();
 const prisma = new PrismaClient();
@@ -32,6 +36,12 @@ const GEMINI_TEXT_TIMEOUT_MS = Number(process.env.GEMINI_TEXT_TIMEOUT_MS || 3000
 const RAG_SERVICE_URL = process.env.RAG_SERVICE_URL || 'http://rag:3003';
 const ANALYTICS_URL = process.env.ANALYTICS_URL || 'http://analytics:3004';
 const INTERNAL_SERVICE_TOKEN = process.env.INTERNAL_SERVICE_TOKEN || '';
+const OPENROUTER_API_KEY = process.env.OPENROUTER_API_KEY || '';
+const OPENROUTER_API_BASE_URL = process.env.OPENROUTER_API_BASE_URL || 'https://openrouter.ai/api/v1';
+const OPENROUTER_QUIZ_MODEL = process.env.OPENROUTER_QUIZ_MODEL || 'openai/gpt-5-mini';
+const OPENROUTER_QUIZ_REASONING_EFFORT = process.env.OPENROUTER_QUIZ_REASONING_EFFORT || 'medium';
+const OPENROUTER_QUIZ_TIMEOUT_MS = Number(process.env.OPENROUTER_QUIZ_TIMEOUT_MS || 60000);
+const OPENROUTER_QUIZ_MAX_COMPLETION_TOKENS = Number(process.env.OPENROUTER_QUIZ_MAX_COMPLETION_TOKENS || 4200);
 const COMFYUI_URL = process.env.COMFYUI_URL || 'http://comfyui:8188';
 const FILE_STORAGE_PATH = process.env.FILE_STORAGE_PATH || path.join(__dirname, 'storage');
 const IMAGE_OUTPUT_DIR = path.join(FILE_STORAGE_PATH, 'images');
@@ -57,6 +67,15 @@ app.get('/health', (_req, res) => {
 });
 
 const studentOnly = [requireAuth, requireAuth.requireRole('student')];
+
+function requireTeacherOrInternal(req, res, next) {
+  const internalToken = req.headers['x-internal-service-token'];
+  if (INTERNAL_SERVICE_TOKEN && internalToken === INTERNAL_SERVICE_TOKEN) {
+    req.internalCaller = true;
+    return next();
+  }
+  return requireAuth(req, res, () => requireAuth.requireRole('teacher')(req, res, next));
+}
 
 app.post('/api/ai/chat/session', ...studentOnly, asyncHandler(async (req, res) => {
   const subject = normalizeSubject(req.body?.subject);
@@ -507,6 +526,69 @@ app.get('/api/ai/images/:filename', ...studentOnly, asyncHandler(async (req, res
   } catch (err) {
     if (err.code === 'ENOENT') return res.status(404).json({ error: 'Image not found.' });
     throw err;
+  }
+}));
+
+app.post('/api/ai/quiz/draft', requireTeacherOrInternal, asyncHandler(async (req, res) => {
+  let normalized;
+  try {
+    normalized = normalizeQuizDraftRequest({
+      ...(req.body || {}),
+      chapter: {
+        ...(req.body?.chapter || req.body?.metadata || {}),
+        schoolId: req.body?.chapter?.schoolId || req.body?.metadata?.schoolId || req.user?.schoolId,
+      },
+      teacherId: req.body?.teacherId || req.user?.userId,
+    });
+  } catch (err) {
+    return res.status(400).json({ error: err.message });
+  }
+
+  try {
+    const result = await generateQuizDraft({
+      payload: normalized,
+      config: {
+        openrouterApiKey: OPENROUTER_API_KEY,
+        baseUrl: OPENROUTER_API_BASE_URL,
+        model: OPENROUTER_QUIZ_MODEL,
+        reasoningEffort: OPENROUTER_QUIZ_REASONING_EFFORT,
+        timeoutMs: OPENROUTER_QUIZ_TIMEOUT_MS,
+        maxCompletionTokens: OPENROUTER_QUIZ_MAX_COMPLETION_TOKENS,
+      },
+    });
+
+    fireAnalyticsEvent({
+      type: 'quiz_draft_created',
+      schoolId: normalized.chapter.schoolId,
+      studentId: req.user?.role === 'student' ? req.user.userId : undefined,
+      subject: normalized.chapter.subject,
+      metadata: {
+        chapterNumber: normalized.chapter.chapterNumber,
+        chapterName: normalized.chapter.chapterName,
+        questionCount: normalized.questionCount,
+        model: result.model,
+        generatedBy: req.internalCaller ? 'quiz-service' : 'teacher',
+      },
+    });
+
+    res.status(200).json({
+      draft: result.draft,
+      model: result.model,
+      usage: result.usage,
+      difficultyCounts: result.difficultyCounts,
+    });
+  } catch (err) {
+    fireAnalyticsEvent({
+      type: 'quiz_draft_generation_failed',
+      schoolId: normalized.chapter.schoolId,
+      subject: normalized.chapter.subject,
+      metadata: {
+        chapterNumber: normalized.chapter.chapterNumber,
+        chapterName: normalized.chapter.chapterName,
+        reason: err.message,
+      },
+    });
+    res.status(502).json({ error: err.message || 'Quiz generation failed.' });
   }
 }));
 

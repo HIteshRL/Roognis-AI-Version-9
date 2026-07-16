@@ -2,7 +2,7 @@ from dataclasses import dataclass, field
 from typing import Annotated, Any
 
 import jwt
-from fastapi import Cookie, Depends, HTTPException, status
+from fastapi import Cookie, Depends, Header, HTTPException, status
 from jwt import InvalidTokenError
 
 from config import Settings, get_settings
@@ -63,3 +63,19 @@ def require_teacher(user: AuthUser = Depends(get_current_user)) -> AuthUser:
             detail="Forbidden",
         )
     return user
+
+
+def require_internal_token(
+    x_internal_service_token: Annotated[str | None, Header(alias="X-Internal-Service-Token")] = None,
+    settings: Settings = Depends(get_settings),
+) -> None:
+    if not settings.internal_service_token:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Internal service token is not configured.",
+        )
+    if x_internal_service_token != settings.internal_service_token:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Unauthorized",
+        )

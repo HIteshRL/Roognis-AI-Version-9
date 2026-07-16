@@ -1083,6 +1083,156 @@
       font-weight: 720;
     }
 
+    .quiz-source-list .list-item {
+      grid-template-columns: auto 1fr auto;
+      align-items: start;
+    }
+
+    .quiz-counts {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+      margin-top: 7px;
+    }
+
+    .quiz-counts span,
+    .difficulty-chip {
+      padding: 4px 7px;
+      border: 1px solid var(--line);
+      border-radius: 999px;
+      color: var(--muted);
+      background: #fbfcfb;
+      font-size: 11px;
+      font-weight: 800;
+      line-height: 1;
+    }
+
+    .difficulty-chip.simple {
+      color: #245c3d;
+      background: #e8f4ed;
+      border-color: #c8e2d1;
+    }
+
+    .difficulty-chip.medium {
+      color: #80511d;
+      background: #fbf1df;
+      border-color: #ead4b6;
+    }
+
+    .difficulty-chip.hard {
+      color: #7d2c2c;
+      background: #f8e8e8;
+      border-color: #edc9c9;
+    }
+
+    .quiz-preview {
+      display: grid;
+      gap: 14px;
+    }
+
+    .quiz-preview-head {
+      display: grid;
+      gap: 8px;
+      padding-bottom: 12px;
+      border-bottom: 1px solid var(--line);
+    }
+
+    .quiz-preview-head h2 {
+      margin: 0;
+      font-size: 22px;
+      line-height: 1.2;
+    }
+
+    .coverage-list {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+    }
+
+    .question-card {
+      padding: 12px;
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      background: #fbfcfb;
+      display: grid;
+      gap: 9px;
+    }
+
+    .question-card-head {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+    }
+
+    .question-card strong {
+      line-height: 1.35;
+    }
+
+    .option-list {
+      margin: 0;
+      padding-left: 20px;
+      color: var(--muted);
+      display: grid;
+      gap: 5px;
+    }
+
+    .quiz-attempt-form {
+      display: grid;
+      gap: 14px;
+    }
+
+    .answer-options {
+      display: grid;
+      gap: 8px;
+    }
+
+    .answer-option {
+      display: grid;
+      grid-template-columns: auto 1fr;
+      gap: 9px;
+      align-items: start;
+      padding: 10px;
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      background: #ffffff;
+      color: var(--ink);
+      font-size: 13px;
+      font-weight: 620;
+    }
+
+    .answer-option input {
+      margin-top: 2px;
+    }
+
+    .quiz-result-score {
+      padding: 14px;
+      border: 1px solid #c8e2d1;
+      border-radius: var(--radius);
+      background: #edf7f0;
+      display: grid;
+      gap: 6px;
+    }
+
+    .quiz-result-score strong {
+      font-size: 28px;
+      line-height: 1;
+    }
+
+    .answer-result {
+      border-color: #d9e3dd;
+    }
+
+    .answer-result.correct {
+      border-color: #c8e2d1;
+      background: #edf7f0;
+    }
+
+    .answer-result.incorrect {
+      border-color: #edc9c9;
+      background: #fff7f6;
+    }
+
     @media (max-width: 1100px) {
       .student-chat-grid,
       .teacher-ingestion-grid {
@@ -1289,6 +1439,7 @@
               <p class="subtext">Ask doubts, create diagrams, and save useful videos from your current lesson.</p>
             </div>
             <div class="actions">
+              <button class="btn" data-route="student-quizzes">Take quiz</button>
               <button class="btn" data-route="student-videos">Open videos</button>
               <button class="btn primary" data-route="student-tutor">Ask tutor</button>
             </div>
@@ -1355,6 +1506,16 @@
                     <div class="item-subtitle">Loads approved videos for the selected topic.</div>
                   </div>
                   <button class="btn" data-route="student-videos">View</button>
+                </div>
+                <div class="list-item">
+                  <div class="tile-icon">
+                    <svg class="icon" viewBox="0 0 24 24"><path d="M9 11l2 2 4-5"/><path d="M20 6v14H4V4h10l2 2z"/></svg>
+                  </div>
+                  <div>
+                    <div class="item-title">Take a chapter quiz</div>
+                    <div class="item-subtitle">Attempts generated from teacher-ingested ready chapters.</div>
+                  </div>
+                  <button class="btn" data-route="student-quizzes">Start</button>
                 </div>
               </div>
             </section>
@@ -1544,6 +1705,52 @@
                 <div class="panel-title">Selected result</div>
               </div>
               <div class="panel-body list" id="video-detail"></div>
+            </section>
+          </div>
+        </section>
+
+        <section class="view" id="student-quizzes">
+          <div class="page-head">
+            <div>
+              <p class="eyebrow">Practice</p>
+              <h1>Take chapter quizzes.</h1>
+              <p class="subtext">Practice quizzes appear after your teacher ingests a chapter and the quiz is generated.</p>
+            </div>
+            <div class="actions">
+              <button class="btn" id="refresh-student-quizzes-btn" type="button">
+                <svg class="icon" viewBox="0 0 24 24"><path d="M21 12a9 9 0 0 1-15 6.7L3 16"/><path d="M3 21v-5h5"/><path d="M3 12a9 9 0 0 1 15-6.7L21 8"/><path d="M21 3v5h-5"/></svg>
+                Refresh
+              </button>
+            </div>
+          </div>
+
+          <div class="grid dashboard-grid">
+            <section class="panel span-5">
+              <div class="panel-header">
+                <div class="panel-title">Available quizzes</div>
+                <span class="pill" id="student-quiz-library-pill">Loading</span>
+              </div>
+              <div class="panel-body">
+                <div class="list quiz-source-list" id="student-quiz-list">
+                  <div class="quiet-box">
+                    <strong>No quizzes loaded.</strong>
+                    <p>Refresh after your teacher generates quizzes for ready chapters.</p>
+                  </div>
+                </div>
+              </div>
+            </section>
+
+            <section class="panel span-7">
+              <div class="panel-header">
+                <div class="panel-title">Quiz attempt</div>
+                <span class="pill blue" id="student-quiz-attempt-pill">Select a quiz</span>
+              </div>
+              <div class="panel-body quiz-preview" id="student-quiz-attempt">
+                <div class="quiet-box">
+                  <strong>No quiz selected.</strong>
+                  <p>Choose a ready chapter quiz to answer questions and submit your attempt.</p>
+                </div>
+              </div>
             </section>
           </div>
         </section>
@@ -1776,6 +1983,78 @@
           </div>
         </section>
 
+        <section class="view" id="teacher-quizzes">
+          <div class="page-head">
+            <div>
+              <p class="eyebrow">Chapter Quizzes</p>
+              <h1>Review generated chapter quizzes.</h1>
+              <p class="subtext">Generate one grounded quiz for every ready ingested chapter, then review questions by difficulty.</p>
+            </div>
+            <div class="actions">
+              <button class="btn" id="refresh-teacher-quizzes-btn" type="button">
+                <svg class="icon" viewBox="0 0 24 24"><path d="M21 12a9 9 0 0 1-15 6.7L3 16"/><path d="M3 21v-5h5"/><path d="M3 12a9 9 0 0 1 15-6.7L21 8"/><path d="M21 3v5h-5"/></svg>
+                Refresh
+              </button>
+              <button class="btn primary" id="backfill-quizzes-btn" type="button">
+                <svg class="icon" viewBox="0 0 24 24"><path d="M4 4v6h6"/><path d="M20 20v-6h-6"/><path d="M20 9A8 8 0 0 0 6.4 5.4L4 10"/><path d="M4 15a8 8 0 0 0 13.6 3.6L20 14"/></svg>
+                Generate missing
+              </button>
+            </div>
+          </div>
+
+          <div class="grid dashboard-grid">
+            <div class="summary-card span-3">
+              <div class="summary-label">Ready quizzes</div>
+              <div class="summary-value" id="teacher-quiz-ready-count">0</div>
+              <div class="summary-help">Generated and ready for review.</div>
+            </div>
+            <div class="summary-card span-3">
+              <div class="summary-label">Missing</div>
+              <div class="summary-value" id="teacher-quiz-missing-count">0</div>
+              <div class="summary-help">Ready chapters without a quiz.</div>
+            </div>
+            <div class="summary-card span-3">
+              <div class="summary-label">Generating</div>
+              <div class="summary-value" id="teacher-quiz-generating-count">0</div>
+              <div class="summary-help">Drafts currently in progress.</div>
+            </div>
+            <div class="summary-card span-3">
+              <div class="summary-label">Failed</div>
+              <div class="summary-value" id="teacher-quiz-failed-count">0</div>
+              <div class="summary-help">Needs retry or API/config check.</div>
+            </div>
+
+            <section class="panel span-5">
+              <div class="panel-header">
+                <div class="panel-title">Chapter quiz library</div>
+                <span class="pill" id="teacher-quiz-library-pill">Loading</span>
+              </div>
+              <div class="panel-body">
+                <div class="list quiz-source-list" id="teacher-quiz-chapters">
+                  <div class="quiet-box">
+                    <strong>No quiz sources loaded.</strong>
+                    <p>Generate missing quizzes after chapters are ingested.</p>
+                  </div>
+                </div>
+                <div class="form-status" id="teacher-quiz-workspace-status" style="margin-top: 12px;">Ready.</div>
+              </div>
+            </section>
+
+            <section class="panel span-7">
+              <div class="panel-header">
+                <div class="panel-title">Quiz preview</div>
+                <span class="pill blue" id="teacher-quiz-preview-pill">Select a quiz</span>
+              </div>
+              <div class="panel-body quiz-preview" id="teacher-quiz-preview">
+                <div class="quiet-box">
+                  <strong>No quiz selected.</strong>
+                  <p>Choose a ready chapter quiz to review questions, answers, explanations, and source coverage.</p>
+                </div>
+              </div>
+            </section>
+          </div>
+        </section>
+
         <section class="view" id="parent-mvp">
           <div class="page-head">
             <div>
@@ -1871,6 +2150,7 @@
       image: 'M4 19h16M5 17l4-8 4 5 3-4 3 7',
       video: 'M3 5h18v14H3z M10 9l5 3-5 3',
       upload: 'M12 16V4 M7 9l5-5 5 5 M4 20h16',
+      quiz: 'M9 11l2 2 4-5 M20 6v14H4V4h10l2 2h4z',
       user: 'M8 11a4 4 0 1 0 0-8 4 4 0 0 0 0 8z M2 21a6 6 0 0 1 12 0 M17 7v6M14 10h6',
     };
 
@@ -1883,6 +2163,7 @@
         nav: [
           ['student-mvp', 'Home', iconPaths.dashboard],
           ['student-tutor', 'Tutor', iconPaths.chat],
+          ['student-quizzes', 'Quizzes', iconPaths.quiz],
           ['student-diagrams', 'Diagrams', iconPaths.image],
           ['student-videos', 'Videos', iconPaths.video],
         ],
@@ -1895,6 +2176,7 @@
         nav: [
           ['teacher-mvp', 'Class Overview', iconPaths.dashboard],
           ['teacher-ingestion', 'Ingestion', iconPaths.upload],
+          ['teacher-quizzes', 'Quizzes', iconPaths.quiz],
         ],
       },
       parent: {
@@ -1911,10 +2193,12 @@
     const routeMeta = {
       'student-mvp': ['Home', 'Learning dashboard'],
       'student-tutor': ['Tutor', 'Ask questions from your selected lesson'],
+      'student-quizzes': ['Quizzes', 'Chapter practice from ready lessons'],
       'student-diagrams': ['Diagrams', 'Create school diagrams'],
       'student-videos': ['Videos', 'Video recommendations from tutor chat'],
       'teacher-mvp': ['Teacher Dashboard', 'Class activity and knowledge coverage'],
       'teacher-ingestion': ['Knowledge Ingestion', 'Upload PDFs into the Educational Knowledge Engine'],
+      'teacher-quizzes': ['Chapter Quizzes', 'Generate and review chapter quizzes'],
       'parent-mvp': ['Parent Progress', 'Linked child summary from analytics'],
     };
 
@@ -1941,6 +2225,11 @@
       activityFlushInFlight: false,
       ingestionPollTimer: null,
       activeIngestionDocumentId: null,
+      teacherQuizRefreshTimer: null,
+      selectedTeacherQuizId: null,
+      studentQuizzes: [],
+      selectedStudentQuizId: null,
+      activeStudentQuiz: null,
       selectedParentStudentId: null,
     };
 
@@ -2075,7 +2364,11 @@
       state.lastAssistantMessageId = null;
       state.activeIngestionDocumentId = null;
       state.selectedParentStudentId = null;
+      state.selectedTeacherQuizId = null;
+      state.selectedStudentQuizId = null;
+      state.activeStudentQuiz = null;
       clearTimeout(state.ingestionPollTimer);
+      clearTimeout(state.teacherQuizRefreshTimer);
 
       const config = roleConfig[role];
       document.querySelector('#user-name').textContent = user.name;
@@ -2092,10 +2385,12 @@
         loadChatSessions();
         loadVideoTopics();
         loadStudentDashboard();
+        loadStudentQuizzes();
       }
       if (role === 'teacher') {
         loadTeacherDashboard();
         loadTeacherDocuments();
+        loadTeacherQuizzes();
       }
       if (role === 'parent') loadLinkedChildren();
     }
@@ -2112,7 +2407,9 @@
         loadStudentLessons();
         loadChatSessions();
       }
+      if (route === 'student-quizzes') loadStudentQuizzes();
       if (route === 'teacher-ingestion') loadTeacherDocuments();
+      if (route === 'teacher-quizzes') loadTeacherQuizzes();
     }
 
     document.querySelector('#login-form').addEventListener('submit', async event => {
@@ -2162,7 +2459,11 @@
       state.sessionId = null;
       state.lastAssistantMessageId = null;
       state.activeIngestionDocumentId = null;
+      state.selectedTeacherQuizId = null;
+      state.selectedStudentQuizId = null;
+      state.activeStudentQuiz = null;
       clearTimeout(state.ingestionPollTimer);
+      clearTimeout(state.teacherQuizRefreshTimer);
       document.querySelector('#session-pill').innerHTML = '<span class="dot"></span>Ready';
       appShell.classList.add('hidden');
       authScreen.classList.remove('hidden');
@@ -2493,6 +2794,448 @@
       }).join('');
     }
 
+    async function loadStudentQuizzes() {
+      const list = document.querySelector('#student-quiz-list');
+      if (!list || state.role !== 'student') return;
+      if (state.demoMode) {
+        setText('#student-quiz-library-pill', 'Demo');
+        renderStudentQuizList([]);
+        return;
+      }
+
+      try {
+        const payload = await apiJson('/api/quiz/student/chapters');
+        state.studentQuizzes = payload.quizzes || [];
+        setConnection(true, 'Online');
+        renderStudentQuizList(state.studentQuizzes);
+      } catch (error) {
+        state.studentQuizzes = [];
+        setText('#student-quiz-library-pill', 'Unavailable');
+        list.innerHTML = `<div class="quiet-box"><strong>Quiz library unavailable.</strong><p>${escapeHtml(error.message)}</p></div>`;
+        if (!error.status) setConnection(false, 'Offline');
+      }
+    }
+
+    function renderStudentQuizList(items) {
+      const list = document.querySelector('#student-quiz-list');
+      if (!list) return;
+      setText('#student-quiz-library-pill', `${items.length} ready`);
+
+      if (!items.length) {
+        list.innerHTML = `
+          <div class="quiet-box">
+            <strong>No generated quizzes yet.</strong>
+            <p>Ask your teacher to generate missing quizzes after chapters are ready.</p>
+          </div>
+        `;
+        renderStudentQuizAttempt(null);
+        return;
+      }
+
+      list.innerHTML = items.map(item => {
+        const source = item.source || {};
+        const quiz = item.quiz || {};
+        const selected = quiz.quizId === state.selectedStudentQuizId;
+        const counts = quiz.difficultyCounts || {};
+        const latest = quiz.latestAttempt;
+        const meta = [
+          source.subject,
+          source.grade ? `Grade ${source.grade}` : '',
+          source.chapterNumber ? `Chapter ${source.chapterNumber}` : '',
+        ].filter(Boolean).join(' - ');
+        return `
+          <div class="list-item${selected ? ' active' : ''}">
+            <div class="tile-icon">
+              <svg class="icon" viewBox="0 0 24 24"><path d="M9 11l2 2 4-5"/><path d="M20 6v14H4V4h10l2 2z"/></svg>
+            </div>
+            <div>
+              <div class="item-title">${escapeHtml(quiz.title || source.chapterName || 'Chapter quiz')}</div>
+              <div class="item-subtitle">${escapeHtml(meta || 'Ready chapter')}</div>
+              <div class="quiz-counts">
+                <span>${Number(quiz.questionCount || 0)} questions</span>
+                <span>${Number(counts.simple || 0)} simple</span>
+                <span>${Number(counts.medium || 0)} medium</span>
+                <span>${Number(counts.hard || 0)} hard</span>
+              </div>
+              ${latest ? `<div class="small">Latest score: ${Number(latest.score || 0)} / ${Number(latest.maxScore || 0)} (${formatPercent(latest.percentage)})</div>` : ''}
+            </div>
+            <button class="btn ${latest ? '' : 'primary'}" type="button" data-student-quiz="${escapeHtml(quiz.quizId)}">${latest ? 'Retake' : 'Start'}</button>
+          </div>
+        `;
+      }).join('');
+    }
+
+    async function loadStudentQuiz(quizId) {
+      if (!quizId || state.demoMode) return;
+      state.selectedStudentQuizId = quizId;
+      setText('#student-quiz-attempt-pill', 'Loading');
+      renderStudentQuizList(state.studentQuizzes);
+      try {
+        const quiz = await apiJson(`/api/quiz/student/quizzes/${encodeURIComponent(quizId)}`);
+        state.activeStudentQuiz = quiz;
+        renderStudentQuizAttempt(quiz);
+      } catch (error) {
+        setText('#student-quiz-attempt-pill', 'Unavailable');
+        document.querySelector('#student-quiz-attempt').innerHTML = `<div class="quiet-box"><strong>Quiz unavailable.</strong><p>${escapeHtml(error.message)}</p></div>`;
+      }
+    }
+
+    function renderStudentQuizAttempt(quiz) {
+      const target = document.querySelector('#student-quiz-attempt');
+      if (!target) return;
+      if (!quiz) {
+        setText('#student-quiz-attempt-pill', 'Select a quiz');
+        target.innerHTML = `
+          <div class="quiet-box">
+            <strong>No quiz selected.</strong>
+            <p>Choose a ready chapter quiz to answer questions and submit your attempt.</p>
+          </div>
+        `;
+        return;
+      }
+
+      const counts = quiz.difficultyCounts || {};
+      const source = quiz.source || {};
+      const latest = quiz.latestAttempt;
+      setText('#student-quiz-attempt-pill', `${quiz.questionCount || 0} questions`);
+      target.innerHTML = `
+        <div class="quiz-preview-head">
+          <h2>${escapeHtml(quiz.title || 'Chapter quiz')}</h2>
+          <div class="small">${escapeHtml(source.subject || '')} ${source.grade ? `- Grade ${escapeHtml(source.grade)}` : ''} ${source.chapterNumber ? `- Chapter ${escapeHtml(source.chapterNumber)}` : ''}</div>
+          <p class="subtext">${escapeHtml(quiz.chapterSummary || '')}</p>
+          <div class="quiz-counts">
+            <span>${Number(counts.simple || 0)} simple</span>
+            <span>${Number(counts.medium || 0)} medium</span>
+            <span>${Number(counts.hard || 0)} hard</span>
+            ${latest ? `<span>Latest ${formatPercent(latest.percentage)}</span>` : ''}
+          </div>
+        </div>
+        <form class="quiz-attempt-form" id="student-quiz-form">
+          ${(quiz.questions || []).map((question, index) => renderStudentQuizQuestion(question, index)).join('')}
+          <button class="btn primary" id="student-quiz-submit-btn" type="submit">
+            <svg class="icon" viewBox="0 0 24 24"><path d="M20 6 9 17l-5-5"/></svg>
+            Submit quiz
+          </button>
+          <div class="form-status" id="student-quiz-submit-status"></div>
+        </form>
+      `;
+    }
+
+    function renderStudentQuizQuestion(question, index) {
+      const options = Array.isArray(question.options) ? question.options : [];
+      const title = `Q${Number(question.order || index + 1)} - ${formatStatus(question.difficulty)} - ${question.marks || 1} mark${Number(question.marks || 1) === 1 ? '' : 's'}`;
+      const answerControl = question.type === 'mcq'
+        ? `
+          <div class="answer-options">
+            ${options.map((option, optionIndex) => `
+              <label class="answer-option" for="quiz-${escapeHtml(question.questionId)}-${optionIndex}">
+                <input id="quiz-${escapeHtml(question.questionId)}-${optionIndex}" type="radio" name="quiz-${escapeHtml(question.questionId)}" data-quiz-answer="${escapeHtml(question.questionId)}" value="${escapeHtml(option)}" required>
+                <span>${escapeHtml(option)}</span>
+              </label>
+            `).join('')}
+          </div>
+        `
+        : `<textarea data-quiz-answer="${escapeHtml(question.questionId)}" required placeholder="Write your answer"></textarea>`;
+
+      return `
+        <div class="question-card">
+          <div class="question-card-head">
+            <span class="difficulty-chip ${escapeHtml(question.difficulty)}">${escapeHtml(title)}</span>
+            <span class="small">${escapeHtml(question.conceptTag || '')}</span>
+          </div>
+          <strong>${escapeHtml(question.prompt || '')}</strong>
+          ${answerControl}
+        </div>
+      `;
+    }
+
+    async function submitStudentQuiz(event) {
+      event.preventDefault();
+      if (!state.activeStudentQuiz) return;
+      const form = event.currentTarget;
+      const button = document.querySelector('#student-quiz-submit-btn');
+      const statusNode = document.querySelector('#student-quiz-submit-status');
+      const answers = {};
+      form.querySelectorAll('[data-quiz-answer]').forEach(field => {
+        const questionId = field.dataset.quizAnswer;
+        if (!questionId) return;
+        if (field.type === 'radio') {
+          if (field.checked) answers[questionId] = field.value;
+          return;
+        }
+        answers[questionId] = field.value;
+      });
+
+      button.disabled = true;
+      statusNode.textContent = 'Submitting answers...';
+      try {
+        const result = await apiJson(`/api/quiz/student/quizzes/${encodeURIComponent(state.activeStudentQuiz.quizId)}/submit`, {
+          method: 'POST',
+          body: { answers },
+        });
+        setConnection(true, 'Online');
+        renderStudentQuizResult(state.activeStudentQuiz, result);
+        await loadStudentQuizzes();
+        loadStudentDashboard();
+      } catch (error) {
+        statusNode.textContent = error.message || 'Quiz submission failed.';
+        if (!error.status) setConnection(false, 'Offline');
+      } finally {
+        button.disabled = false;
+      }
+    }
+
+    function renderStudentQuizResult(quiz, result) {
+      const target = document.querySelector('#student-quiz-attempt');
+      if (!target) return;
+      setText('#student-quiz-attempt-pill', `${formatPercent(result.percentage)} score`);
+      target.innerHTML = `
+        <div class="quiz-result-score">
+          <span class="small">Submitted</span>
+          <strong>${Number(result.score || 0)} / ${Number(result.maxScore || 0)}</strong>
+          <span>${formatPercent(result.percentage)} - ${Number(result.correctCount || 0)} of ${Number(result.questionCount || 0)} correct</span>
+        </div>
+        <div class="quiz-preview-head">
+          <h2>${escapeHtml(quiz.title || 'Chapter quiz')}</h2>
+          <p class="subtext">${result.weakAreas?.length ? 'Review the explanations below and retry when ready.' : 'Nice work. Your attempt has been saved.'}</p>
+          <div class="actions">
+            <button class="btn" type="button" data-retake-student-quiz="${escapeHtml(quiz.quizId)}">Retake</button>
+            <button class="btn" type="button" data-route="student-tutor">Ask tutor</button>
+          </div>
+        </div>
+        <div class="list">
+          ${(result.results || []).map(item => renderStudentQuizAnswerResult(item)).join('')}
+        </div>
+      `;
+    }
+
+    function renderStudentQuizAnswerResult(item) {
+      return `
+        <div class="question-card answer-result ${item.correct ? 'correct' : 'incorrect'}">
+          <div class="question-card-head">
+            <span class="difficulty-chip ${escapeHtml(item.difficulty)}">${item.correct ? 'Correct' : 'Review'} - Q${escapeHtml(item.order || '')}</span>
+            <span class="small">${escapeHtml(item.conceptTag || '')}</span>
+          </div>
+          <strong>${escapeHtml(item.prompt || '')}</strong>
+          <div class="status-list">
+            <div class="status-row"><span>Your answer</span><strong>${escapeHtml(item.studentAnswer || '-')}</strong></div>
+            <div class="status-row"><span>Correct answer</span><strong>${escapeHtml(item.correctAnswer || '-')}</strong></div>
+          </div>
+          <div class="small">${escapeHtml(item.explanation || '')}</div>
+        </div>
+      `;
+    }
+
+    async function loadTeacherQuizzes() {
+      const list = document.querySelector('#teacher-quiz-chapters');
+      if (!list || state.role !== 'teacher') return;
+      if (state.demoMode) {
+        setText('#teacher-quiz-library-pill', 'Demo');
+        renderTeacherQuizChapters([]);
+        return;
+      }
+
+      try {
+        const payload = await apiJson('/api/quiz/chapters');
+        setConnection(true, 'Online');
+        renderTeacherQuizChapters(payload.chapters || []);
+      } catch (error) {
+        setText('#teacher-quiz-library-pill', 'Unavailable');
+        renderTeacherQuizSummary([]);
+        list.innerHTML = `<div class="quiet-box"><strong>Quiz service unavailable.</strong><p>${escapeHtml(error.message)}</p></div>`;
+        if (!error.status) setConnection(false, 'Offline');
+      }
+    }
+
+    function renderTeacherQuizChapters(chapters) {
+      const list = document.querySelector('#teacher-quiz-chapters');
+      if (!list) return;
+      renderTeacherQuizSummary(chapters);
+      setText('#teacher-quiz-library-pill', `${chapters.length} chapters`);
+
+      if (!chapters.length) {
+        list.innerHTML = `
+          <div class="quiet-box">
+            <strong>No quiz sources yet.</strong>
+            <p>Click Generate missing after chapter PDFs reach ready state.</p>
+          </div>
+        `;
+        renderTeacherQuizPreview(null);
+        return;
+      }
+
+      const readyQuizIds = chapters.map(item => item.quiz?.quizId).filter(Boolean);
+      if (!readyQuizIds.includes(state.selectedTeacherQuizId)) {
+        state.selectedTeacherQuizId = readyQuizIds[0] || null;
+      }
+
+      list.innerHTML = chapters.map(item => {
+        const status = item.quizStatus || 'missing';
+        const ready = status === 'ready' && item.quiz?.quizId;
+        const selected = item.quiz?.quizId === state.selectedTeacherQuizId;
+        const title = [
+          item.subject,
+          item.grade ? `Grade ${item.grade}` : '',
+          item.chapterNumber ? `Chapter ${item.chapterNumber}` : '',
+        ].filter(Boolean).join(' - ');
+        const counts = item.quiz?.difficultyCounts || {};
+        const failure = item.lastGenerationError ? `<div class="small">Failure: ${escapeHtml(item.lastGenerationError)}</div>` : '';
+        return `
+          <div class="list-item${selected ? ' active' : ''}" data-source-id="${escapeHtml(item.sourceId)}">
+            <div class="tile-icon ${status === 'failed' ? 'red' : status === 'generating' ? 'amber' : ''}">
+              <svg class="icon" viewBox="0 0 24 24"><path d="M9 11l2 2 4-5"/><path d="M20 6v14H4V4h10l2 2z"/></svg>
+            </div>
+            <div>
+              <div class="item-title">${escapeHtml(item.chapterName || 'Chapter quiz')}</div>
+              <div class="item-subtitle">${escapeHtml(title || 'Chapter metadata')}</div>
+              <div class="small">${Number(item.chunkCount || 0)} chunks - ${Number(item.entityCount || 0)} entities</div>
+              ${ready ? `
+                <div class="quiz-counts">
+                  <span>${Number(item.quiz.questionCount || 0)} questions</span>
+                  <span>${Number(counts.simple || 0)} simple</span>
+                  <span>${Number(counts.medium || 0)} medium</span>
+                  <span>${Number(counts.hard || 0)} hard</span>
+                </div>
+              ` : ''}
+              ${failure}
+            </div>
+            <div class="actions">
+              <span class="${statusPillClass(status)}">${escapeHtml(formatStatus(status))}</span>
+              ${ready ? `<button class="btn" type="button" data-teacher-quiz="${escapeHtml(item.quiz.quizId)}">View</button>` : ''}
+              ${status !== 'generating' ? `<button class="btn icon-only" type="button" data-generate-source="${escapeHtml(item.sourceId)}" aria-label="Generate quiz"><svg class="icon" viewBox="0 0 24 24"><path d="M4 4v6h6"/><path d="M20 20v-6h-6"/><path d="M20 9A8 8 0 0 0 6.4 5.4L4 10"/><path d="M4 15a8 8 0 0 0 13.6 3.6L20 14"/></svg></button>` : ''}
+            </div>
+          </div>
+        `;
+      }).join('');
+
+      if (state.selectedTeacherQuizId) {
+        loadTeacherQuizPreview(state.selectedTeacherQuizId);
+      } else {
+        renderTeacherQuizPreview(null);
+      }
+    }
+
+    function renderTeacherQuizSummary(chapters) {
+      const counts = chapters.reduce((acc, item) => {
+        const status = item.quizStatus || 'missing';
+        if (status === 'ready') acc.ready += 1;
+        else if (status === 'generating') acc.generating += 1;
+        else if (status === 'failed') acc.failed += 1;
+        else acc.missing += 1;
+        return acc;
+      }, { ready: 0, missing: 0, generating: 0, failed: 0 });
+      setText('#teacher-quiz-ready-count', counts.ready);
+      setText('#teacher-quiz-missing-count', counts.missing);
+      setText('#teacher-quiz-generating-count', counts.generating);
+      setText('#teacher-quiz-failed-count', counts.failed);
+    }
+
+    async function loadTeacherQuizPreview(quizId) {
+      if (!quizId || state.demoMode) {
+        renderTeacherQuizPreview(null);
+        return;
+      }
+      setText('#teacher-quiz-preview-pill', 'Loading');
+      try {
+        const quiz = await apiJson(`/api/quiz/${encodeURIComponent(quizId)}`);
+        state.selectedTeacherQuizId = quiz.quizId;
+        renderTeacherQuizPreview(quiz);
+      } catch (error) {
+        setText('#teacher-quiz-preview-pill', 'Unavailable');
+        document.querySelector('#teacher-quiz-preview').innerHTML = `<div class="quiet-box"><strong>Quiz unavailable.</strong><p>${escapeHtml(error.message)}</p></div>`;
+      }
+    }
+
+    function renderTeacherQuizPreview(quiz) {
+      const target = document.querySelector('#teacher-quiz-preview');
+      if (!target) return;
+      if (!quiz) {
+        setText('#teacher-quiz-preview-pill', 'Select a quiz');
+        target.innerHTML = `
+          <div class="quiet-box">
+            <strong>No quiz selected.</strong>
+            <p>Choose a ready chapter quiz to review questions, answers, explanations, and source coverage.</p>
+          </div>
+        `;
+        return;
+      }
+
+      const counts = quiz.difficultyCounts || {};
+      setText('#teacher-quiz-preview-pill', `${quiz.questionCount || 0} questions`);
+      const coverage = Array.isArray(quiz.sourceCoverage) ? quiz.sourceCoverage : [];
+      const questionsByDifficulty = groupBy(quiz.questions || [], question => question.difficulty || 'simple');
+      const source = quiz.source || {};
+      target.innerHTML = `
+        <div class="quiz-preview-head">
+          <h2>${escapeHtml(quiz.title || 'Chapter quiz')}</h2>
+          <div class="small">${escapeHtml(source.subject || '')} ${source.grade ? `- Grade ${escapeHtml(source.grade)}` : ''} ${source.chapterNumber ? `- Chapter ${escapeHtml(source.chapterNumber)}` : ''}</div>
+          <p class="subtext">${escapeHtml(quiz.chapterSummary || '')}</p>
+          <div class="quiz-counts">
+            <span>${Number(counts.simple || 0)} simple</span>
+            <span>${Number(counts.medium || 0)} medium</span>
+            <span>${Number(counts.hard || 0)} hard</span>
+            <span>${escapeHtml(quiz.generationModel || 'model')}</span>
+          </div>
+          <div class="coverage-list">
+            ${coverage.slice(0, 10).map(item => `<span class="difficulty-chip">${escapeHtml(item.concept || 'Concept')}</span>`).join('')}
+          </div>
+        </div>
+        ${['simple', 'medium', 'hard'].map(difficulty => renderDifficultyQuestions(difficulty, questionsByDifficulty[difficulty] || [])).join('')}
+      `;
+    }
+
+    function renderDifficultyQuestions(difficulty, questions) {
+      if (!questions.length) return '';
+      return `
+        <div class="difficulty-section">
+          <div class="question-card-head">
+            <span class="difficulty-chip ${difficulty}">${escapeHtml(formatStatus(difficulty))}</span>
+            <span class="small">${questions.length} questions</span>
+          </div>
+          <div class="list">
+            ${questions.map(question => renderTeacherQuestion(question)).join('')}
+          </div>
+        </div>
+      `;
+    }
+
+    function renderTeacherQuestion(question) {
+      const options = Array.isArray(question.options) && question.options.length
+        ? `<ol class="option-list">${question.options.map(option => `<li>${escapeHtml(option)}</li>`).join('')}</ol>`
+        : '';
+      return `
+        <div class="question-card">
+          <div class="question-card-head">
+            <span class="difficulty-chip ${escapeHtml(question.difficulty)}">Q${escapeHtml(question.order || '')} - ${escapeHtml(question.bloomLevel || '')}</span>
+            <span class="small">${escapeHtml(question.conceptTag || '')}</span>
+          </div>
+          <strong>${escapeHtml(question.prompt || '')}</strong>
+          ${options}
+          <div class="status-list">
+            <div class="status-row"><span>Answer</span><strong>${escapeHtml(question.correctAnswer || '')}</strong></div>
+            <div class="status-row"><span>Weak area</span><strong>${escapeHtml(question.weakAreaLabel || '')}</strong></div>
+          </div>
+          <div class="small">${escapeHtml(question.explanation || '')}</div>
+        </div>
+      `;
+    }
+
+    function groupBy(items, getKey) {
+      return items.reduce((groups, item) => {
+        const key = getKey(item);
+        groups[key] = groups[key] || [];
+        groups[key].push(item);
+        return groups;
+      }, {});
+    }
+
+    function scheduleTeacherQuizRefresh() {
+      clearTimeout(state.teacherQuizRefreshTimer);
+      state.teacherQuizRefreshTimer = setTimeout(() => {
+        loadTeacherQuizzes();
+      }, 2500);
+    }
+
     function statusPillClass(status) {
       if (status === 'ready') return 'pill';
       if (status === 'failed') return 'pill red';
@@ -2512,6 +3255,7 @@
           if (statusPayload.status === 'ready') {
             setIngestionState('complete', 'Ready for retrieval', 100);
             await loadTeacherDocuments();
+            await loadTeacherQuizzes();
             return;
           }
           if (statusPayload.status === 'failed') {
@@ -2544,6 +3288,7 @@
         if (statusPayload.status === 'ready') {
           setIngestionState('complete', 'Ready for retrieval', 100);
           await loadTeacherDocuments();
+          await loadTeacherQuizzes();
           return;
         }
         if (statusPayload.status === 'failed') {
@@ -2605,6 +3350,7 @@
         );
         startIngestionStatusPolling(payload.documentId, payload);
         await loadTeacherDocuments();
+        await loadTeacherQuizzes();
       } catch (error) {
         setIngestionState('failed', error.message, 0);
         if (!error.status) setConnection(false, 'Offline');
@@ -2615,10 +3361,83 @@
 
     document.querySelector('#refresh-documents-btn').addEventListener('click', loadTeacherDocuments);
 
+    document.querySelector('#refresh-teacher-quizzes-btn').addEventListener('click', loadTeacherQuizzes);
+
+    document.querySelector('#backfill-quizzes-btn').addEventListener('click', async event => {
+      if (state.demoMode) {
+        setText('#teacher-quiz-workspace-status', 'Backend sign-in required for quiz generation.');
+        return;
+      }
+      const button = event.currentTarget;
+      button.disabled = true;
+      setText('#teacher-quiz-workspace-status', 'Generating missing quizzes from ready chapters...');
+      try {
+        const payload = await apiJson('/api/quiz/backfill', { method: 'POST', body: {} });
+        setConnection(true, 'Online');
+        setText(
+          '#teacher-quiz-workspace-status',
+          `Queued ${payload.queued?.length || 0} quizzes from ${payload.discovered || 0} ready chapters.`
+        );
+        await loadTeacherQuizzes();
+        scheduleTeacherQuizRefresh();
+        setTimeout(loadTeacherQuizzes, 9000);
+      } catch (error) {
+        setText('#teacher-quiz-workspace-status', error.message || 'Quiz backfill failed.');
+        if (!error.status) setConnection(false, 'Offline');
+      } finally {
+        button.disabled = false;
+      }
+    });
+
     document.querySelector('#teacher-documents').addEventListener('click', event => {
       const button = event.target.closest('[data-document-status]');
       if (!button) return;
       loadDocumentIngestionStatus(button.dataset.documentStatus);
+    });
+
+    document.querySelector('#teacher-quiz-chapters').addEventListener('click', async event => {
+      const quizButton = event.target.closest('[data-teacher-quiz]');
+      if (quizButton) {
+        state.selectedTeacherQuizId = quizButton.dataset.teacherQuiz;
+        loadTeacherQuizPreview(state.selectedTeacherQuizId);
+        return;
+      }
+
+      const generateButton = event.target.closest('[data-generate-source]');
+      if (!generateButton) return;
+      generateButton.disabled = true;
+      setText('#teacher-quiz-workspace-status', 'Queued quiz generation for this chapter...');
+      try {
+        await apiJson(`/api/quiz/sources/${encodeURIComponent(generateButton.dataset.generateSource)}/generate`, {
+          method: 'POST',
+          body: {},
+        });
+        await loadTeacherQuizzes();
+        scheduleTeacherQuizRefresh();
+        setTimeout(loadTeacherQuizzes, 9000);
+      } catch (error) {
+        setText('#teacher-quiz-workspace-status', error.message || 'Quiz generation failed.');
+      } finally {
+        generateButton.disabled = false;
+      }
+    });
+
+    document.querySelector('#refresh-student-quizzes-btn').addEventListener('click', loadStudentQuizzes);
+
+    document.querySelector('#student-quiz-list').addEventListener('click', event => {
+      const button = event.target.closest('[data-student-quiz]');
+      if (!button) return;
+      loadStudentQuiz(button.dataset.studentQuiz);
+    });
+
+    document.querySelector('#student-quiz-attempt').addEventListener('submit', event => {
+      if (event.target.matches('#student-quiz-form')) submitStudentQuiz(event);
+    });
+
+    document.querySelector('#student-quiz-attempt').addEventListener('click', event => {
+      const retakeButton = event.target.closest('[data-retake-student-quiz]');
+      if (!retakeButton) return;
+      loadStudentQuiz(retakeButton.dataset.retakeStudentQuiz);
     });
 
     async function loadChatSessions() {
