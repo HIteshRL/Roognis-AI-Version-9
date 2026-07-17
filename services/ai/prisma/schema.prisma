@@ -112,6 +112,27 @@ model StudentLearningProfile {
   @@schema("ai_db")
 }
 
+model StudentNewsArticle {
+  id           String   @id @default(uuid()) @db.Uuid
+  sourceKey    String   @map("source_key") @db.VarChar(80)
+  sourceName   String   @map("source_name") @db.VarChar(120)
+  category     String   @db.VarChar(60)
+  title        String   @db.VarChar(240)
+  summary      String   @db.Text
+  url          String   @unique @db.VarChar(1200)
+  imageUrl     String?  @map("image_url") @db.VarChar(1600)
+  publishedAt  DateTime @map("published_at")
+  expiresAt    DateTime @map("expires_at")
+  safetyStatus String   @default("approved") @map("safety_status") @db.VarChar(30)
+  createdAt    DateTime @default(now()) @map("created_at")
+  updatedAt    DateTime @updatedAt @map("updated_at")
+
+  @@index([safetyStatus, publishedAt])
+  @@index([category, publishedAt])
+  @@map("student_news_articles")
+  @@schema("ai_db")
+}
+
 enum MessageRole {
   user
   assistant

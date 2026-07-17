@@ -594,6 +594,130 @@
       line-height: 1.4;
     }
 
+    .student-news-panel {
+      overflow: hidden;
+    }
+
+    .student-news-panel .panel-header {
+      background: linear-gradient(90deg, #f4f8f5, #fffaf0);
+    }
+
+    .news-carousel-body {
+      padding: 0;
+      min-height: 330px;
+    }
+
+    .news-story {
+      min-height: 330px;
+      display: grid;
+      grid-template-columns: 1fr;
+      background: #fbfcfb;
+    }
+
+    .news-story.has-image {
+      grid-template-columns: minmax(320px, 0.95fr) minmax(0, 1.05fr);
+    }
+
+    .news-story-image {
+      width: 100%;
+      height: 100%;
+      min-height: 330px;
+      object-fit: cover;
+      background: #e7ece8;
+    }
+
+    .news-story-copy {
+      padding: clamp(22px, 4vw, 42px);
+      display: flex;
+      flex-direction: column;
+      justify-content: center;
+      align-items: flex-start;
+    }
+
+    .news-story-meta {
+      margin-bottom: 14px;
+      display: flex;
+      align-items: center;
+      flex-wrap: wrap;
+      gap: 8px;
+      color: var(--muted);
+      font-size: 12px;
+      font-weight: 720;
+    }
+
+    .news-category {
+      padding: 6px 9px;
+      border-radius: 999px;
+      color: #284c7d;
+      background: #e7eef8;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      font-size: 10px;
+      font-weight: 850;
+    }
+
+    .news-story-title {
+      max-width: 760px;
+      margin: 0;
+      font-size: clamp(24px, 3.5vw, 38px);
+      line-height: 1.08;
+      letter-spacing: -0.025em;
+    }
+
+    .news-story-summary {
+      max-width: 760px;
+      margin: 15px 0 20px;
+      color: var(--muted);
+      font-size: 15px;
+      line-height: 1.65;
+    }
+
+    .news-carousel-controls {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+
+    .news-arrow {
+      width: 42px;
+      height: 42px;
+      padding: 0;
+      border: 1px solid var(--line);
+      border-radius: 50%;
+      display: grid;
+      place-items: center;
+      color: var(--ink);
+      background: #ffffff;
+      cursor: pointer;
+    }
+
+    .news-arrow:hover {
+      border-color: var(--green);
+      color: var(--green-dark);
+    }
+
+    .news-dots {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+
+    .news-dot {
+      width: 8px;
+      height: 8px;
+      padding: 0;
+      border: 0;
+      border-radius: 50%;
+      background: #c9d2cc;
+      cursor: pointer;
+    }
+
+    .news-dot.active {
+      width: 22px;
+      border-radius: 999px;
+      background: var(--green);
+    }
+
     .list {
       display: grid;
       gap: 10px;
@@ -1533,6 +1657,19 @@
         min-height: 290px;
       }
 
+      .news-story.has-image {
+        grid-template-columns: 1fr;
+      }
+
+      .news-story-image {
+        min-height: 210px;
+        max-height: 250px;
+      }
+
+      .news-story-copy {
+        padding: 22px;
+      }
+
       .chapter-browser-head {
         align-items: flex-start;
         flex-direction: column;
@@ -1845,6 +1982,19 @@
               <div class="summary-value" id="student-progress-value">0%</div>
               <div class="summary-help">From quiz and practice events when available.</div>
             </div>
+
+            <section class="panel span-12 student-news-panel" aria-labelledby="student-news-title">
+              <div class="panel-header">
+                <div class="panel-title" id="student-news-title">Good news to explore</div>
+                <span class="pill" id="student-news-pill">Loading</span>
+              </div>
+              <div class="panel-body news-carousel-body" id="student-news-carousel" aria-live="polite">
+                <div class="quiet-box" style="margin: 18px;">
+                  <strong>Finding student-safe stories...</strong>
+                  <p>Technology, science, sport, and constructive world affairs.</p>
+                </div>
+              </div>
+            </section>
 
             <section class="panel span-7">
               <div class="panel-header">
@@ -2655,6 +2805,8 @@
       selectedParentStudentId: null,
       onboarding: null,
       onboardingIndex: 0,
+      studentNews: [],
+      studentNewsIndex: 0,
     };
 
     const authScreen = document.querySelector('#auth-screen');
@@ -2836,6 +2988,7 @@
         loadStudentLessons();
         loadChatSessions();
       }
+      if (route === 'student-mvp') loadStudentNews();
       if (route === 'student-quizzes') loadStudentQuizzes();
       if (route === 'teacher-ingestion') loadTeacherDocuments();
       if (route === 'teacher-quizzes') loadTeacherQuizzes();
@@ -5081,6 +5234,101 @@
         setText('#student-analytics-pill', 'Unavailable');
       }
     }
+
+    async function loadStudentNews() {
+      const carousel = document.querySelector('#student-news-carousel');
+      if (!carousel || state.role !== 'student') return;
+      if (state.demoMode) {
+        state.studentNews = [];
+        renderStudentNews();
+        setText('#student-news-pill', 'Sign in required');
+        return;
+      }
+
+      carousel.innerHTML = '<div class="quiet-box" style="margin:18px;"><strong>Finding student-safe stories...</strong><p>Only approved educational news will appear here.</p></div>';
+      try {
+        const payload = await apiJson('/api/ai/news?limit=15');
+        state.studentNews = Array.isArray(payload.articles) ? payload.articles : [];
+        state.studentNewsIndex = Math.min(state.studentNewsIndex, Math.max(state.studentNews.length - 1, 0));
+        renderStudentNews();
+        setText('#student-news-pill', state.studentNews.length ? `${state.studentNews.length} safe stories` : 'No stories');
+      } catch (error) {
+        state.studentNews = [];
+        carousel.innerHTML = `<div class="quiet-box" style="margin:18px;"><strong>News is taking a break.</strong><p>${escapeHtml(error.message || 'Please try again later.')}</p></div>`;
+        setText('#student-news-pill', 'Unavailable');
+      }
+    }
+
+    function renderStudentNews() {
+      const carousel = document.querySelector('#student-news-carousel');
+      if (!carousel) return;
+      const articles = state.studentNews || [];
+      if (!articles.length) {
+        carousel.innerHTML = '<div class="quiet-box" style="margin:18px;"><strong>No approved stories right now.</strong><p>New safe stories will appear automatically after the next refresh.</p></div>';
+        return;
+      }
+
+      const index = Math.min(Math.max(state.studentNewsIndex, 0), articles.length - 1);
+      state.studentNewsIndex = index;
+      const article = articles[index];
+      const hasImage = Boolean(article.imageUrl);
+      const published = formatNewsDate(article.publishedAt);
+      const dots = articles.map((_item, dotIndex) => `
+        <button class="news-dot${dotIndex === index ? ' active' : ''}" type="button" data-news-index="${dotIndex}" aria-label="Show story ${dotIndex + 1}"></button>
+      `).join('');
+
+      carousel.innerHTML = `
+        <article class="news-story${hasImage ? ' has-image' : ''}">
+          ${hasImage ? `<img class="news-story-image" src="${safeUrl(article.imageUrl)}" alt="" loading="lazy" referrerpolicy="no-referrer">` : ''}
+          <div class="news-story-copy">
+            <div class="news-story-meta">
+              <span class="news-category">${escapeHtml(article.category || 'News')}</span>
+              <span>${escapeHtml(article.sourceName || 'Trusted source')}</span>
+              ${published ? `<span>· ${escapeHtml(published)}</span>` : ''}
+            </div>
+            <h2 class="news-story-title">${escapeHtml(article.title || 'Student news')}</h2>
+            <p class="news-story-summary">${escapeHtml(article.summary || '')}</p>
+            <div class="news-carousel-controls">
+              <button class="news-arrow" type="button" data-news-direction="-1" aria-label="Previous story">←</button>
+              <a class="btn primary" href="${safeUrl(article.url)}" target="_blank" rel="noopener noreferrer">Read original</a>
+              <button class="news-arrow" type="button" data-news-direction="1" aria-label="Next story">→</button>
+              <div class="news-dots" aria-label="Story position">${dots}</div>
+            </div>
+          </div>
+        </article>
+      `;
+
+      const image = carousel.querySelector('.news-story-image');
+      image?.addEventListener('error', () => {
+        image.remove();
+        carousel.querySelector('.news-story')?.classList.remove('has-image');
+      }, { once: true });
+    }
+
+    function moveStudentNews(direction) {
+      const count = state.studentNews.length;
+      if (!count) return;
+      state.studentNewsIndex = (state.studentNewsIndex + direction + count) % count;
+      renderStudentNews();
+    }
+
+    function formatNewsDate(value) {
+      const date = new Date(value);
+      if (Number.isNaN(date.getTime())) return '';
+      return date.toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
+    }
+
+    document.querySelector('#student-news-carousel').addEventListener('click', event => {
+      const direction = event.target.closest('[data-news-direction]');
+      if (direction) {
+        moveStudentNews(Number(direction.dataset.newsDirection || 0));
+        return;
+      }
+      const dot = event.target.closest('[data-news-index]');
+      if (!dot) return;
+      state.studentNewsIndex = Number(dot.dataset.newsIndex || 0);
+      renderStudentNews();
+    });
 
     function renderTeacherActions(actions) {
       const container = document.querySelector('#teacher-actions-list');
