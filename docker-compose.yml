@@ -17,7 +17,6 @@ services:
     image: traefik:v2.11
     ports:
       - "80:80"
-      - "8080:8080"  # Dashboard
     volumes:
       - ./traefik/traefik.yml:/etc/traefik/traefik.yml:ro
       - ${DOCKER_SOCKET_PATH:-/var/run/docker.sock}:/var/run/docker.sock:ro
@@ -77,22 +76,25 @@ services:
 
   auth:
     build: ./services/auth
-    ports:
-      - "3001:3001"
     command: >
-      sh -c "NODE_TLS_REJECT_UNAUTHORIZED=0 npx prisma db push --schema=prisma/schema.prisma &&
+      sh -c "npx prisma db push --schema=prisma/schema.prisma &&
              node scripts/seed.js &&
              node server.js"
     environment:
       DATABASE_URL: "postgresql://postgres:${DB_PASSWORD}@postgres:5432/roognis?schema=auth_db"
       JWT_SECRET: ${JWT_SECRET}
-      DEMO_SCHOOL_ID: ${DEMO_SCHOOL_ID}
+      DEMO_SCHOOL_ID: ${DEMO_SCHOOL_ID:-}
       SEED_DEMO_USERS: ${SEED_DEMO_USERS:-true}
+      BOOTSTRAP_ENABLED: ${BOOTSTRAP_ENABLED:-false}
+      BOOTSTRAP_SCHOOL_ID: ${BOOTSTRAP_SCHOOL_ID:-}
+      BOOTSTRAP_SCHOOL_NAME: ${BOOTSTRAP_SCHOOL_NAME:-}
+      BOOTSTRAP_TEACHER_NAME: ${BOOTSTRAP_TEACHER_NAME:-}
+      BOOTSTRAP_TEACHER_EMAIL: ${BOOTSTRAP_TEACHER_EMAIL:-}
+      BOOTSTRAP_TEACHER_PASSWORD: ${BOOTSTRAP_TEACHER_PASSWORD:-}
       ALLOW_SELF_REGISTRATION: ${ALLOW_SELF_REGISTRATION:-false}
       COOKIE_SECURE: ${COOKIE_SECURE:-false}
       PORT: 3001
       NODE_ENV: production
-      NODE_TLS_REJECT_UNAUTHORIZED: "0"
     depends_on:
       postgres:
         condition: service_healthy
@@ -107,7 +109,6 @@ services:
       - "traefik.http.routers.auth.rule=PathPrefix(`/api/auth`)"
       - "traefik.http.routers.auth.entrypoints=web"
       - "traefik.http.services.auth.loadbalancer.server.port=3001"
-      - "traefik.http.routers.auth.middlewares=cors@file"
     restart: unless-stopped
 
   ai:
@@ -147,7 +148,6 @@ services:
       FILE_STORAGE_PATH: /app/storage
       PORT: 3002
       NODE_ENV: production
-      NODE_TLS_REJECT_UNAUTHORIZED: "0"
       # Local fallback providers remain available with:
       # LLM_PROVIDER=ollama IMAGE_PROVIDER=comfyui docker-compose --profile local-ai up --build
       # Cloud swap — set to use S3 instead of Docker volume
@@ -168,7 +168,6 @@ services:
       - "traefik.http.routers.ai.rule=PathPrefix(`/api/ai`)"
       - "traefik.http.routers.ai.entrypoints=web"
       - "traefik.http.services.ai.loadbalancer.server.port=3002"
-      - "traefik.http.routers.ai.middlewares=cors@file"
     restart: unless-stopped
 
   rag:
@@ -178,7 +177,7 @@ services:
       CHROMA_URL: "http://chromadb:8000"
       OLLAMA_URL: "http://ollama:11434"
       OLLAMA_EMBEDDING_MODEL: ${OLLAMA_EMBEDDING_MODEL:-nomic-embed-text}
-      DEMO_SCHOOL_ID: ${DEMO_SCHOOL_ID}
+      DEMO_SCHOOL_ID: ${DEMO_SCHOOL_ID:-}
       JWT_SECRET: ${JWT_SECRET}
       FILE_STORAGE_PATH: /app/storage
       PORT: 3003
@@ -207,7 +206,6 @@ services:
       - "traefik.http.routers.rag.rule=PathPrefix(`/api/rag`)"
       - "traefik.http.routers.rag.entrypoints=web"
       - "traefik.http.services.rag.loadbalancer.server.port=3003"
-      - "traefik.http.routers.rag.middlewares=cors@file"
     restart: unless-stopped
 
   textbook-seed:
@@ -231,8 +229,6 @@ services:
 
   quiz:
     build: ./services/quiz
-    ports:
-      - "3005:3005"
     command: >
       sh -c "[ -f prisma/schema.prisma ] &&
              npx prisma db push --schema=prisma/schema.prisma ||
@@ -247,7 +243,6 @@ services:
       QUIZ_QUESTION_COUNT: ${QUIZ_QUESTION_COUNT:-10}
       PORT: 3005
       NODE_ENV: production
-      NODE_TLS_REJECT_UNAUTHORIZED: "0"
     depends_on:
       postgres:
         condition: service_healthy
@@ -260,7 +255,6 @@ services:
       - "traefik.http.routers.quiz.rule=PathPrefix(`/api/quiz`)"
       - "traefik.http.routers.quiz.entrypoints=web"
       - "traefik.http.services.quiz.loadbalancer.server.port=3005"
-      - "traefik.http.routers.quiz.middlewares=cors@file"
     restart: unless-stopped
 
   analytics:
@@ -275,7 +269,6 @@ services:
       INTERNAL_SERVICE_TOKEN: ${INTERNAL_SERVICE_TOKEN}
       PORT: 3004
       NODE_ENV: production
-      NODE_TLS_REJECT_UNAUTHORIZED: "0"
     depends_on:
       postgres:
         condition: service_healthy
@@ -284,15 +277,12 @@ services:
       - "traefik.http.routers.analytics.rule=PathPrefix(`/api/analytics`)"
       - "traefik.http.routers.analytics.entrypoints=web"
       - "traefik.http.services.analytics.loadbalancer.server.port=3004"
-      - "traefik.http.routers.analytics.middlewares=cors@file"
     restart: unless-stopped
 
   frontend:
     build: ./frontend
-    ports:
-      - "3000:3000"
     environment:
-      NEXT_PUBLIC_API_URL: "http://localhost/api"
+      NEXT_PUBLIC_API_URL: "/api"
       API_PROXY_TARGET: "http://traefik"
       HOST: "0.0.0.0"
       PORT: 3000
@@ -307,5 +297,4 @@ services:
       - "traefik.http.routers.frontend.rule=PathPrefix(`/`)"
       - "traefik.http.routers.frontend.entrypoints=web"
       - "traefik.http.services.frontend.loadbalancer.server.port=3000"
-      - "traefik.http.routers.frontend.middlewares=cors@file"
     restart: unless-stopped

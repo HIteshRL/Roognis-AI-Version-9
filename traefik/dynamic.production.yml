@@ -1,0 +1,17 @@
+http:
+  middlewares:
+    security-headers:
+      headers:
+        contentTypeNosniff: true
+        frameDeny: true
+        referrerPolicy: strict-origin-when-cross-origin
+        permissionsPolicy: "camera=(), microphone=(), geolocation=()"
+        stsSeconds: 31536000
+        stsIncludeSubdomains: true
+    compress:
+      compress: {}
+    api-rate-limit:
+      rateLimit:
+        average: 60
+        burst: 30
+        period: 1m
