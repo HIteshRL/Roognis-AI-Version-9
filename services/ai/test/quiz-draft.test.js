@@ -3,11 +3,13 @@ const assert = require('node:assert/strict');
 
 const {
   buildDifficultyPlan,
+  evenlySample,
   normalizeQuizDraftRequest,
   generateQuizDraft,
   assertOpenRouterOpenAiModel,
   extractResponseText,
   repairQuizDraftCitations,
+  validateQuestionQuality,
   validateQuizDraft,
 } = require('../quiz-draft');
 
@@ -85,6 +87,12 @@ test('normalizes quiz draft request and source chunks', () => {
   assert.equal(request.chapter.grade, 6);
 });
 
+test('samples long chapter context across the beginning, middle, and end', () => {
+  const items = Array.from({ length: 100 }, (_unused, index) => index);
+  const sampled = evenlySample(items, 5);
+  assert.deepEqual(sampled, [0, 25, 50, 74, 99]);
+});
+
 test('validates a grounded quiz draft with exact difficulty distribution', () => {
   assert.equal(validateQuizDraft(sampleDraft(), sampleRequest()), true);
 });
@@ -99,6 +107,48 @@ test('rejects duplicate prompts and unknown source chunks', () => {
   const unknownChunk = sampleDraft();
   unknownChunk.questions[0].sourceChunkIds = ['missing'];
   assert.throws(() => validateQuizDraft(unknownChunk, request), /unknown chunk/);
+});
+
+test('rejects textbook-navigation trivia instead of science understanding', () => {
+  const badPrompts = [
+    'Write the heading used for section 1.1 in this chapter.',
+    'What is the title shown on page 4?',
+    'According to this chapter, which section comes after crop preparation?',
+    'Identify Figure 1.2 from the textbook.',
+  ];
+
+  for (const prompt of badPrompts) {
+    assert.throws(
+      () => validateQuestionQuality({ prompt, conceptTag: 'Agriculture', weakAreaLabel: 'Crop practices' }),
+      /document navigation/
+    );
+  }
+  assert.equal(validateQuestionQuality({
+    prompt: 'Why should a farmer loosen soil before sowing seeds?',
+    conceptTag: 'Soil preparation',
+    weakAreaLabel: 'Tilling purpose',
+  }), true);
+});
+
+test('rejects duplicate and all-of-the-above MCQ options', () => {
+  const request = sampleRequest();
+  const duplicateOptions = sampleDraft();
+  duplicateOptions.questions[0] = {
+    ...duplicateOptions.questions[0],
+    type: 'mcq',
+    options: ['Photosynthesis', 'Respiration', 'Respiration', 'Transpiration'],
+    correctAnswer: 'Photosynthesis',
+  };
+  assert.throws(() => validateQuizDraft(duplicateOptions, request), /distinct/);
+
+  const weakOptions = sampleDraft();
+  weakOptions.questions[0] = {
+    ...weakOptions.questions[0],
+    type: 'mcq',
+    options: ['Photosynthesis', 'Respiration', 'Transpiration', 'All of the above'],
+    correctAnswer: 'Photosynthesis',
+  };
+  assert.throws(() => validateQuizDraft(weakOptions, request), /plausible content-based distractors/);
 });
 
 test('repairs unknown source citations with valid chapter chunks', () => {
@@ -163,6 +213,7 @@ test('sends OpenRouter structured-output request with OpenAI model slug', async 
       reasoningEffort: 'high',
       timeoutMs: 1000,
       maxCompletionTokens: 4000,
+      qualityReview: false,
       siteUrl: 'https://example.test',
       appName: 'Roognis Tests',
     },
@@ -197,4 +248,77 @@ test('sends OpenRouter structured-output request with OpenAI model slug', async 
   assert.equal(Object.prototype.hasOwnProperty.call(capturedRequest.body, 'metadata'), false);
   assert.equal(result.model, 'openai/gpt-5-mini');
   assert.equal(result.usage.total_tokens, 123);
+  assert.equal(result.qualityAttempts, 1);
+});
+
+test('regenerates the whole quiz after the quality gate rejects navigation trivia', async () => {
+  const badDraft = sampleDraft();
+  badDraft.questions[0].prompt = 'Write the heading used for section 1.1 in this chapter.';
+  let calls = 0;
+  const capturedMessages = [];
+
+  const result = await generateQuizDraft({
+    payload: sampleRequest(),
+    config: {
+      openrouterApiKey: 'test-openrouter-key',
+      model: 'openai/gpt-5-mini',
+      timeoutMs: 1000,
+      maxQualityAttempts: 2,
+      qualityReview: false,
+    },
+    fetchFn: async (_url, options) => {
+      calls += 1;
+      capturedMessages.push(JSON.parse(options.body).messages);
+      return {
+        ok: true,
+        json: async () => ({
+          model: 'openai/gpt-5-mini',
+          choices: [{ message: { content: JSON.stringify(calls === 1 ? badDraft : sampleDraft()) } }],
+        }),
+      };
+    },
+  });
+
+  assert.equal(calls, 2);
+  assert.equal(result.qualityAttempts, 2);
+  assert.match(capturedMessages[1][2].content, /previous draft was rejected/i);
+  assert.match(capturedMessages[1][2].content, /document navigation/i);
+});
+
+test('runs a final assessment-editor pass for semantically stronger questions', async () => {
+  const firstDraft = sampleDraft();
+  firstDraft.questions[0] = {
+    ...firstDraft.questions[0],
+    type: 'mcq',
+    options: ['Photosynthesis', 'A microscope', 'Sleeping', 'Changing colour'],
+    correctAnswer: 'Photosynthesis',
+  };
+  let calls = 0;
+  const capturedMessages = [];
+
+  const result = await generateQuizDraft({
+    payload: sampleRequest(),
+    config: {
+      openrouterApiKey: 'test-openrouter-key',
+      model: 'openai/gpt-5-mini',
+      timeoutMs: 1000,
+      maxQualityAttempts: 2,
+    },
+    fetchFn: async (_url, options) => {
+      calls += 1;
+      capturedMessages.push(JSON.parse(options.body).messages);
+      return {
+        ok: true,
+        json: async () => ({
+          model: 'openai/gpt-5-mini',
+          choices: [{ message: { content: JSON.stringify(calls === 1 ? firstDraft : sampleDraft()) } }],
+        }),
+      };
+    },
+  });
+
+  assert.equal(calls, 2);
+  assert.equal(result.qualityReviewed, true);
+  assert.match(capturedMessages[1][3].content, /realistic misconception/i);
+  assert.equal(result.draft.questions[0].type, 'short_answer');
 });

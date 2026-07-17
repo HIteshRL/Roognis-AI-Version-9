@@ -15,6 +15,10 @@ const {
   fetchReadyRagChapters,
 } = require('./lib/generation');
 const { gradeQuizAttempt } = require('./lib/scoring');
+const {
+  buildStudentAttemptWhere,
+  buildStudentLearningContext,
+} = require('./lib/student-learning');
 
 const app = express();
 const PORT = process.env.PORT || 3005;
@@ -45,6 +49,36 @@ app.post('/api/quiz/internal/chapter-ready', requireInternalToken, asyncHandler(
     quizStatus: shouldGenerate ? 'generating' : source.quizStatus,
     queued: shouldGenerate,
   });
+}));
+
+app.get('/api/quiz/internal/student-learning-context', requireInternalToken, asyncHandler(async (req, res) => {
+  let where;
+  try {
+    where = buildStudentAttemptWhere(req.query || {});
+  } catch (error) {
+    return res.status(400).json({ error: error.message });
+  }
+
+  const attempts = await prisma.quizAttempt.findMany({
+    where,
+    orderBy: { submittedAt: 'desc' },
+    take: 10,
+    select: {
+      percentage: true,
+      result: true,
+      submittedAt: true,
+      source: {
+        select: {
+          subject: true,
+          grade: true,
+          chapterNumber: true,
+          chapterName: true,
+        },
+      },
+    },
+  });
+
+  return res.status(200).json(buildStudentLearningContext(attempts, req.query || {}));
 }));
 
 app.get('/api/quiz/chapters', ...teacherOnly, asyncHandler(async (req, res) => {
@@ -130,6 +164,7 @@ app.post('/api/quiz/sources/:sourceId/generate', ...teacherOnly, asyncHandler(as
     trigger: 'manual',
     teacherId: req.user.userId,
     questionCount: req.body?.questionCount,
+    force: true,
   });
   return res.status(202).json({ sourceId: source.id, queued: true, quizStatus: 'generating' });
 }));

@@ -79,6 +79,39 @@ model Feedback {
   @@schema("ai_db")
 }
 
+model StudentOnboarding {
+  id             String           @id @default(uuid()) @db.Uuid
+  studentId      String           @unique @map("student_id") @db.Uuid
+  schoolId       String           @map("school_id") @db.Uuid
+  status         OnboardingStatus @default(in_progress)
+  questionSource String           @default("fallback") @map("question_source") @db.VarChar(40)
+  questions      Json
+  answers        Json             @default("{}")
+  startedAt      DateTime         @default(now()) @map("started_at")
+  completedAt    DateTime?        @map("completed_at")
+  updatedAt      DateTime         @updatedAt @map("updated_at")
+
+  @@index([schoolId, status])
+  @@map("student_onboarding")
+  @@schema("ai_db")
+}
+
+model StudentLearningProfile {
+  id            String   @id @default(uuid()) @db.Uuid
+  studentId     String   @unique @map("student_id") @db.Uuid
+  schoolId      String   @map("school_id") @db.Uuid
+  profile       Json
+  promptContext String   @map("prompt_context") @db.Text
+  source        String   @default("onboarding") @db.VarChar(40)
+  version       Int      @default(1)
+  createdAt     DateTime @default(now()) @map("created_at")
+  updatedAt     DateTime @updatedAt @map("updated_at")
+
+  @@index([schoolId])
+  @@map("student_learning_profiles")
+  @@schema("ai_db")
+}
+
 enum MessageRole {
   user
   assistant
@@ -91,6 +124,13 @@ enum ImageJobStatus {
   processing
   done
   failed
+
+  @@schema("ai_db")
+}
+
+enum OnboardingStatus {
+  in_progress
+  completed
 
   @@schema("ai_db")
 }

@@ -1,0 +1,37 @@
+{
+  "board": "CBSE",
+  "curriculum": "NCERT",
+  "grade": 8,
+  "language": "English",
+  "chapters": [
+    { "subject": "Science", "book": "Science", "edition": "2024-25", "chapterNumber": 1, "chapterName": "Crop Production and Management", "file": "class-8-science/hesc101.pdf" },
+    { "subject": "Science", "book": "Science", "edition": "2024-25", "chapterNumber": 2, "chapterName": "Microorganisms: Friend and Foe", "file": "class-8-science/hesc102.pdf" },
+    { "subject": "Science", "book": "Science", "edition": "2024-25", "chapterNumber": 3, "chapterName": "Coal and Petroleum", "file": "class-8-science/hesc103.pdf" },
+    { "subject": "Science", "book": "Science", "edition": "2024-25", "chapterNumber": 4, "chapterName": "Combustion and Flame", "file": "class-8-science/hesc104.pdf" },
+    { "subject": "Science", "book": "Science", "edition": "2024-25", "chapterNumber": 5, "chapterName": "Conservation of Plants and Animals", "file": "class-8-science/hesc105.pdf" },
+    { "subject": "Science", "book": "Science", "edition": "2024-25", "chapterNumber": 6, "chapterName": "Reproduction in Animals", "file": "class-8-science/hesc106.pdf" },
+    { "subject": "Science", "book": "Science", "edition": "2024-25", "chapterNumber": 7, "chapterName": "Reaching the Age of Adolescence", "file": "class-8-science/hesc107.pdf" },
+    { "subject": "Science", "book": "Science", "edition": "2024-25", "chapterNumber": 8, "chapterName": "Force and Pressure", "file": "class-8-science/hesc108.pdf" },
+    { "subject": "Science", "book": "Science", "edition": "2024-25", "chapterNumber": 9, "chapterName": "Friction", "file": "class-8-science/hesc109.pdf" },
+    { "subject": "Science", "book": "Science", "edition": "2024-25", "chapterNumber": 10, "chapterName": "Sound", "file": "class-8-science/hesc110.pdf" },
+    { "subject": "Science", "book": "Science", "edition": "2024-25", "chapterNumber": 11, "chapterName": "Chemical Effects of Electric Current", "file": "class-8-science/hesc111.pdf" },
+    { "subject": "Science", "book": "Science", "edition": "2024-25", "chapterNumber": 12, "chapterName": "Some Natural Phenomena", "file": "class-8-science/hesc112.pdf" },
+    { "subject": "Science", "book": "Science", "edition": "2024-25", "chapterNumber": 13, "chapterName": "Light", "file": "class-8-science/hesc113.pdf" },
+
+    { "subject": "Mathematics", "book": "Ganita Prakash", "edition": "2026-27", "chapterNumber": 1, "chapterName": "A Square and a Cube", "file": "class-8-mathematics/hegp101.pdf" },
+    { "subject": "Mathematics", "book": "Ganita Prakash", "edition": "2026-27", "chapterNumber": 2, "chapterName": "Power Play", "file": "class-8-mathematics/hegp102.pdf" },
+    { "subject": "Mathematics", "book": "Ganita Prakash", "edition": "2026-27", "chapterNumber": 3, "chapterName": "A Story of Numbers", "file": "class-8-mathematics/hegp103.pdf" },
+    { "subject": "Mathematics", "book": "Ganita Prakash", "edition": "2026-27", "chapterNumber": 4, "chapterName": "Quadrilaterals", "file": "class-8-mathematics/hegp104.pdf" },
+    { "subject": "Mathematics", "book": "Ganita Prakash", "edition": "2026-27", "chapterNumber": 5, "chapterName": "Number Play", "file": "class-8-mathematics/hegp105.pdf" },
+    { "subject": "Mathematics", "book": "Ganita Prakash", "edition": "2026-27", "chapterNumber": 6, "chapterName": "We Distribute, Yet Things Multiply", "file": "class-8-mathematics/hegp106.pdf" },
+    { "subject": "Mathematics", "book": "Ganita Prakash", "edition": "2026-27", "chapterNumber": 7, "chapterName": "Proportional Reasoning-1", "file": "class-8-mathematics/hegp107.pdf" },
+
+    { "subject": "Social Science", "book": "Exploring Society: India and Beyond Part 1", "edition": "2026-27", "chapterNumber": 1, "chapterName": "Natural Resources and Their Use", "file": "class-8-social-science/hees101.pdf" },
+    { "subject": "Social Science", "book": "Exploring Society: India and Beyond Part 1", "edition": "2026-27", "chapterNumber": 2, "chapterName": "Reshaping India's Political Map", "file": "class-8-social-science/hees102.pdf" },
+    { "subject": "Social Science", "book": "Exploring Society: India and Beyond Part 1", "edition": "2026-27", "chapterNumber": 3, "chapterName": "The Rise of the Marathas", "file": "class-8-social-science/hees103.pdf" },
+    { "subject": "Social Science", "book": "Exploring Society: India and Beyond Part 1", "edition": "2026-27", "chapterNumber": 4, "chapterName": "The Colonial Era in India", "file": "class-8-social-science/hees104.pdf" },
+    { "subject": "Social Science", "book": "Exploring Society: India and Beyond Part 1", "edition": "2026-27", "chapterNumber": 5, "chapterName": "Universal Franchise and India's Electoral System", "file": "class-8-social-science/hees105.pdf" },
+    { "subject": "Social Science", "book": "Exploring Society: India and Beyond Part 1", "edition": "2026-27", "chapterNumber": 6, "chapterName": "The Parliamentary System: Legislature and Executive", "file": "class-8-social-science/hees106.pdf" },
+    { "subject": "Social Science", "book": "Exploring Society: India and Beyond Part 1", "edition": "2026-27", "chapterNumber": 7, "chapterName": "Factors of Production", "file": "class-8-social-science/hees107.pdf" }
+  ]
+}

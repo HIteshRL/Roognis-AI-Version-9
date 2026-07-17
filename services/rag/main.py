@@ -312,7 +312,7 @@ def internal_chapter_context(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Ready chapter context not found.")
 
     document_ids = [document.id for document in documents]
-    chunks = db.scalars(
+    all_chunks = db.scalars(
         select(RetrievalChunk)
         .where(RetrievalChunk.document_id.in_(document_ids))
         .order_by(
@@ -320,8 +320,8 @@ def internal_chapter_context(
             RetrievalChunk.document_id.asc(),
             RetrievalChunk.chunk_index.asc(),
         )
-        .limit(maxChunks)
     ).all()
+    chunks = evenly_sample_items(all_chunks, maxChunks)
     entities = db.scalars(
         select(EducationalEntity)
         .where(EducationalEntity.document_id.in_(document_ids))
@@ -334,6 +334,20 @@ def internal_chapter_context(
         "chunks": [chunk_context_item(chunk) for chunk in chunks],
         "entities": [entity_context_item(entity) for entity in entities],
     }
+
+
+def evenly_sample_items(items: list, limit: int) -> list:
+    """Keep pedagogical order while representing the beginning, middle, and end."""
+    if limit <= 0 or not items:
+        return []
+    if len(items) <= limit:
+        return items
+    if limit == 1:
+        return [items[0]]
+
+    last_index = len(items) - 1
+    indices = [round(position * last_index / (limit - 1)) for position in range(limit)]
+    return [items[index] for index in indices]
 
 
 def chapter_identity_key(document: Document) -> tuple:
