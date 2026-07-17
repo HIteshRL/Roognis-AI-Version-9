@@ -1,4 +1,6 @@
 .env
+.env.production
+backups/
 .env.gemini-template
 node_modules/
 __pycache__/

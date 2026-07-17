@@ -1,10 +1,8 @@
 const { PrismaClient } = require('@prisma/client');
 const bcrypt = require('bcryptjs');
+const { resolveBootstrapConfig } = require('../lib/bootstrap');
 
 const prisma = new PrismaClient();
-
-const DEMO_SCHOOL_ID = process.env.DEMO_SCHOOL_ID;
-const SEED_DEMO_USERS = process.env.SEED_DEMO_USERS === 'true';
 
 const DEMO_USERS = [
   { name: 'Demo Teacher',  email: 'teacher@demo.com', password: 'demo1234', role: 'teacher' },
@@ -16,8 +14,9 @@ const DEMO_USERS = [
 ];
 
 async function main() {
-  if (!SEED_DEMO_USERS) {
-    console.log('[seed] Demo user seeding disabled.');
+  const config = resolveBootstrapConfig();
+  if (config.mode === 'disabled') {
+    console.log('[seed] Automatic user bootstrap disabled.');
     return;
   }
 
@@ -27,17 +26,28 @@ async function main() {
     return;
   }
 
-  if (!DEMO_SCHOOL_ID) {
-    console.error('[seed] DEMO_SCHOOL_ID environment variable is required.');
-    process.exit(1);
-  }
-
   await prisma.school.upsert({
-    where:  { id: DEMO_SCHOOL_ID },
-    create: { id: DEMO_SCHOOL_ID, name: 'Demo School' },
-    update: { name: 'Demo School' },
+    where:  { id: config.schoolId },
+    create: { id: config.schoolId, name: config.schoolName },
+    update: { name: config.schoolName },
   });
-  console.log('[seed] School upserted:', DEMO_SCHOOL_ID);
+  console.log(`[seed] ${config.mode} school upserted:`, config.schoolId);
+
+  if (config.mode === 'production') {
+    const passwordHash = await bcrypt.hash(config.teacherPassword, 12);
+    await prisma.user.create({
+      data: {
+        name: config.teacherName,
+        email: config.teacherEmail,
+        passwordHash,
+        role: 'teacher',
+        schoolId: config.schoolId,
+      },
+    });
+    console.log(`[seed] Production teacher created: ${config.teacherEmail}`);
+    console.log('[seed] Disable BOOTSTRAP_ENABLED and remove the bootstrap password after textbook seeding.');
+    return;
+  }
 
   const created = {};
   for (const u of DEMO_USERS) {
@@ -48,7 +58,7 @@ async function main() {
         email:        u.email,
         passwordHash,
         role:         u.role,
-        schoolId:     DEMO_SCHOOL_ID,
+        schoolId:     config.schoolId,
       },
     });
     created[u.email] = user.id;

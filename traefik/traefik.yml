@@ -1,6 +1,5 @@
 api:
-  dashboard: true
-  insecure: true
+  dashboard: false
 
 entryPoints:
   web:
@@ -11,21 +10,3 @@ providers:
     exposedByDefault: false
   file:
     filename: /etc/traefik/traefik.yml
-
-http:
-  middlewares:
-    cors:
-      headers:
-        accessControlAllowOriginList:
-          - "http://localhost:3000"
-        accessControlAllowCredentials: true
-        accessControlAllowMethods:
-          - "GET"
-          - "POST"
-          - "PUT"
-          - "DELETE"
-          - "OPTIONS"
-        accessControlAllowHeaders:
-          - "Content-Type"
-          - "Authorization"
-        addVaryHeader: true

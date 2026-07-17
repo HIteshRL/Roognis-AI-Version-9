@@ -120,6 +120,9 @@ parent_student  — parent_id, student_id  (composite PK, idempotent linking)
 
 **`docker-compose.yml`** — full-stack orchestration. The default MVP path uses hosted providers and deterministic RAG test-mode embeddings, so Ollama, ChromaDB, and ComfyUI are behind the optional `local-ai` profile.
 
+For an HTTPS, secrets-hardened Oracle Cloud deployment, use the production
+override and follow [docs/ORACLE_DEPLOYMENT.md](docs/ORACLE_DEPLOYMENT.md).
+
 **`traefik/traefik.yml`** — API gateway config. Routes requests by path prefix to the correct service. CORS configured for `localhost:3000`. Dashboard available at `http://localhost:8080`.
 
 **`scripts/ollama-init.sh`** — Optional local fallback entrypoint for Ollama. Starts the server, waits for the API, pulls `qwen2.5` and `nomic-embed-text` (idempotent — skips if already in the volume), then keeps the container alive.

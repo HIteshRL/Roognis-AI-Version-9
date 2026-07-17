@@ -131,6 +131,7 @@ function selectStudentNews(candidates, options = {}) {
   const limit = Number(options.limit || 40);
   const cutoff = now.getTime() - maxAgeDays * 24 * 60 * 60 * 1000;
   const seen = new Set();
+  const uniqueStories = [];
 
   const eligible = candidates
     .filter(isStudentSafeNews)
@@ -140,9 +141,50 @@ function selectStudentNews(candidates, options = {}) {
       const key = canonicalArticleUrl(candidate.url);
       if (!key || seen.has(key)) return false;
       seen.add(key);
+      if (uniqueStories.some(article => areSimilarNewsStories(article, candidate))) return false;
+      uniqueStories.push(candidate);
       return true;
     });
   return balanceNewsCategories(eligible, limit);
+}
+
+const NEWS_TITLE_STOP_WORDS = new Set([
+  'a', 'an', 'and', 'are', 'as', 'at', 'be', 'been', 'by', 'for', 'from', 'has',
+  'have', 'how', 'in', 'into', 'is', 'it', 'its', 'of', 'on', 'says', 'that',
+  'the', 'their', 'this', 'to', 'was', 'were', 'what', 'when', 'where', 'which',
+  'who', 'why', 'will', 'with', 'watch', 'live', 'update', 'updates', 'new', 'newly',
+]);
+
+function areSimilarNewsStories(first, second) {
+  if (!first || !second || first.category !== second.category) return false;
+  const firstTokens = meaningfulTitleTokens(first.title);
+  const secondTokens = meaningfulTitleTokens(second.title);
+  if (firstTokens.length < 2 || secondTokens.length < 2) return false;
+
+  const firstSet = new Set(firstTokens);
+  const secondSet = new Set(secondTokens);
+  const sharedTokens = [...firstSet].filter(token => secondSet.has(token));
+  const smallerSetSize = Math.min(firstSet.size, secondSet.size);
+  if (sharedTokens.length >= 3 && sharedTokens.length / smallerSetSize >= 0.45) return true;
+
+  const firstBigrams = new Set(titleBigrams(firstTokens));
+  return titleBigrams(secondTokens).some(bigram => firstBigrams.has(bigram));
+}
+
+function meaningfulTitleTokens(title) {
+  return String(title || '')
+    .toLowerCase()
+    .replace(/[^a-z0-9\s]/g, ' ')
+    .split(/\s+/)
+    .filter(token => token.length >= 3 && !NEWS_TITLE_STOP_WORDS.has(token));
+}
+
+function titleBigrams(tokens) {
+  const bigrams = [];
+  for (let index = 0; index < tokens.length - 1; index += 1) {
+    bigrams.push(`${tokens[index]} ${tokens[index + 1]}`);
+  }
+  return bigrams;
 }
 
 function balanceNewsCategories(articles, limit = 15) {
@@ -317,6 +359,7 @@ module.exports = {
   isStudentSafeNews,
   selectStudentNews,
   balanceNewsCategories,
+  areSimilarNewsStories,
   refreshStudentNews,
   extractOriginalImageUrl,
 };

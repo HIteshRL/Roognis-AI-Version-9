@@ -6,6 +6,7 @@ const {
   isStudentSafeNews,
   selectStudentNews,
   balanceNewsCategories,
+  areSimilarNewsStories,
   extractOriginalImageUrl,
 } = require('../student-news');
 
@@ -62,6 +63,26 @@ test('selects recent safe stories, removes duplicates, and keeps newest first', 
     { category: 'Sports', title: 'Old result', summary: 'Tournament', url: 'https://example.org/c', publishedAt: new Date('2026-06-01') },
   ], { now });
   assert.deepEqual(selected.map(item => item.title), ['Newest', 'Older']);
+});
+
+test('recognizes separate articles about the same news event', () => {
+  assert.equal(areSimilarNewsStories(
+    { category: 'Science', title: 'What we know about newly discovered monkey species' },
+    { category: 'Science', title: 'New monkey species with orange lips found in Congo forest' }
+  ), true);
+  assert.equal(areSimilarNewsStories(
+    { category: 'Science', title: 'Curlew chicks released to boost species numbers' },
+    { category: 'Science', title: 'New monkey species discovered in Congo forest' }
+  ), false);
+});
+
+test('topic deduplication keeps only the newest article for a repeated event', () => {
+  const now = new Date('2026-07-17T12:00:00Z');
+  const selected = selectStudentNews([
+    { category: 'Science', title: 'New monkey species discovered in Congo', summary: 'A science discovery', url: 'https://example.org/monkey-new', publishedAt: new Date('2026-07-17') },
+    { category: 'Science', title: 'Watch: newly discovered monkey species explained', summary: 'A science discovery', url: 'https://example.org/monkey-old', publishedAt: new Date('2026-07-16') },
+  ], { now });
+  assert.deepEqual(selected.map(item => item.title), ['New monkey species discovered in Congo']);
 });
 
 test('balances categories so a busy sports feed cannot crowd out educational stories', () => {

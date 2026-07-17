@@ -8,6 +8,7 @@
     "dev": "nodemon server.js",
     "test": "node --test",
     "db:push": "npx prisma db push --schema=prisma/schema.prisma",
+    "db:migrate": "npx prisma migrate deploy --schema=prisma/schema.prisma",
     "db:generate": "npx prisma generate --schema=prisma/schema.prisma"
   },
   "dependencies": {

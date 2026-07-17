@@ -5,6 +5,7 @@ const rateLimit  = require('express-rate-limit');
 const { PrismaClient } = require('@prisma/client');
 
 const requireAuth = require('../middleware/auth');
+const { normalizeProvisionRequest, validatePassword } = require('../lib/account');
 
 const router = express.Router();
 const prisma = new PrismaClient();
@@ -131,6 +132,88 @@ router.post('/login', loginLimiter, async (req, res) => {
 router.post('/logout', requireAuth, (req, res) => {
   clearJwtCookie(res);
   return res.status(200).json({ message: 'Logged out successfully.' });
+});
+
+// POST /api/auth/users — school-scoped account provisioning for teachers.
+router.post('/users', requireAuth, requireAuth.requireRole('teacher'), async (req, res) => {
+  try {
+    const input = normalizeProvisionRequest(req.body);
+    const existing = await prisma.user.findUnique({ where: { email: input.email } });
+    if (existing) return res.status(409).json({ error: 'An account with this email already exists.' });
+
+    const passwordHash = await bcrypt.hash(input.password, 12);
+    const user = await prisma.user.create({
+      data: {
+        name: input.name,
+        email: input.email,
+        passwordHash,
+        role: input.role,
+        schoolId: req.user.schoolId,
+      },
+      select: { id: true, name: true, email: true, role: true, schoolId: true },
+    });
+    return res.status(201).json({
+      userId: user.id,
+      name: user.name,
+      email: user.email,
+      role: user.role,
+      schoolId: user.schoolId,
+    });
+  } catch (err) {
+    if (err instanceof Error && /Name|email|Password|Teachers/.test(err.message)) {
+      return res.status(400).json({ error: err.message });
+    }
+    console.error('[auth] provision user error:', err);
+    return res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// GET /api/auth/users — teachers can list accounts only within their school.
+router.get('/users', requireAuth, requireAuth.requireRole('teacher'), async (req, res) => {
+  try {
+    const role = String(req.query.role || '').trim().toLowerCase();
+    if (role && !['student', 'parent'].includes(role)) {
+      return res.status(400).json({ error: 'role must be student or parent.' });
+    }
+    const users = await prisma.user.findMany({
+      where: { schoolId: req.user.schoolId, ...(role ? { role } : { role: { in: ['student', 'parent'] } }) },
+      select: { id: true, name: true, email: true, role: true, schoolId: true, createdAt: true },
+      orderBy: [{ role: 'asc' }, { name: 'asc' }],
+    });
+    return res.status(200).json(users.map(user => ({
+      userId: user.id,
+      name: user.name,
+      email: user.email,
+      role: user.role,
+      schoolId: user.schoolId,
+      createdAt: user.createdAt,
+    })));
+  } catch (err) {
+    console.error('[auth] list users error:', err);
+    return res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// POST /api/auth/change-password — authenticated users rotate their own password.
+router.post('/change-password', requireAuth, async (req, res) => {
+  try {
+    const currentPassword = String(req.body.currentPassword || '');
+    const newPassword = validatePassword(req.body.newPassword);
+    const user = await prisma.user.findUnique({ where: { id: req.user.userId } });
+    if (!user || !(await bcrypt.compare(currentPassword, user.passwordHash))) {
+      return res.status(401).json({ error: 'Current password is incorrect.' });
+    }
+    const passwordHash = await bcrypt.hash(newPassword, 12);
+    await prisma.user.update({ where: { id: user.id }, data: { passwordHash } });
+    clearJwtCookie(res);
+    return res.status(200).json({ message: 'Password changed. Sign in again.' });
+  } catch (err) {
+    if (err instanceof Error && /Password|public demo/.test(err.message)) {
+      return res.status(400).json({ error: err.message });
+    }
+    console.error('[auth] change password error:', err);
+    return res.status(500).json({ error: 'Internal server error' });
+  }
 });
 
 // GET /api/auth/me
