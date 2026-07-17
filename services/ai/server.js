@@ -20,6 +20,21 @@ const {
   generateQuizDraft,
   normalizeQuizDraftRequest,
 } = require('./quiz-draft');
+const {
+  sanitizeQuestions,
+  normalizeAnswers,
+  buildFallbackProfile,
+  sanitizeLearningProfile,
+  formatProfileForPrompt,
+  buildQuestionGenerationPrompt,
+  buildProfileGenerationPrompt,
+  extractJsonObject,
+} = require('./onboarding');
+const {
+  normalizeQuizLearningContext,
+  formatQuizLearningContextForPrompt,
+  buildQuizLearningContextUrl,
+} = require('./quiz-learning-context');
 
 const app = express();
 const prisma = new PrismaClient();
@@ -34,6 +49,7 @@ const GEMINI_TEXT_MODEL = process.env.GEMINI_TEXT_MODEL || 'gemini-3.1-flash-lit
 const GEMINI_IMAGE_MODEL = process.env.GEMINI_IMAGE_MODEL || 'gemini-3.1-flash-image';
 const GEMINI_TEXT_TIMEOUT_MS = Number(process.env.GEMINI_TEXT_TIMEOUT_MS || 30000);
 const RAG_SERVICE_URL = process.env.RAG_SERVICE_URL || 'http://rag:3003';
+const QUIZ_SERVICE_URL = process.env.QUIZ_SERVICE_URL || 'http://quiz:3005';
 const ANALYTICS_URL = process.env.ANALYTICS_URL || 'http://analytics:3004';
 const INTERNAL_SERVICE_TOKEN = process.env.INTERNAL_SERVICE_TOKEN || '';
 const OPENROUTER_API_KEY = process.env.OPENROUTER_API_KEY || '';
@@ -68,6 +84,137 @@ app.get('/health', (_req, res) => {
 
 const studentOnly = [requireAuth, requireAuth.requireRole('student')];
 
+app.get('/api/ai/onboarding', ...studentOnly, asyncHandler(async (req, res) => {
+  const onboarding = await prisma.studentOnboarding.findUnique({
+    where: { studentId: req.user.userId },
+  });
+  const profile = await prisma.studentLearningProfile.findUnique({
+    where: { studentId: req.user.userId },
+    select: { profile: true, updatedAt: true, version: true },
+  });
+
+  res.status(200).json(serializeOnboarding(onboarding, profile));
+}));
+
+app.post('/api/ai/onboarding/start', ...studentOnly, asyncHandler(async (req, res) => {
+  const existing = await prisma.studentOnboarding.findUnique({
+    where: { studentId: req.user.userId },
+  });
+  if (existing) {
+    const profile = existing.status === 'completed'
+      ? await prisma.studentLearningProfile.findUnique({ where: { studentId: req.user.userId } })
+      : null;
+    return res.status(200).json(serializeOnboarding(existing, profile));
+  }
+
+  const generated = await generateOnboardingQuestions();
+  const onboarding = await prisma.studentOnboarding.create({
+    data: {
+      studentId: req.user.userId,
+      schoolId: req.user.schoolId,
+      status: 'in_progress',
+      questionSource: generated.source,
+      questions: generated.questions,
+      answers: {},
+    },
+  });
+
+  return res.status(201).json(serializeOnboarding(onboarding, null));
+}));
+
+app.patch('/api/ai/onboarding/answers', ...studentOnly, asyncHandler(async (req, res) => {
+  const onboarding = await prisma.studentOnboarding.findUnique({
+    where: { studentId: req.user.userId },
+  });
+  if (!onboarding) return res.status(409).json({ error: 'Start onboarding before saving answers.' });
+  if (onboarding.status === 'completed') {
+    return res.status(409).json({ error: 'Onboarding has already been completed.' });
+  }
+
+  const questions = sanitizeQuestions(onboarding.questions);
+  const merged = { ...asJsonObject(onboarding.answers), ...asJsonObject(req.body?.answers) };
+  const normalized = normalizeAnswers(questions, merged);
+  if (normalized.errors.length) return res.status(400).json({ error: normalized.errors[0] });
+
+  const updated = await prisma.studentOnboarding.update({
+    where: { studentId: req.user.userId },
+    data: { answers: normalized.answers },
+  });
+  return res.status(200).json(serializeOnboarding(updated, null));
+}));
+
+app.post('/api/ai/onboarding/complete', ...studentOnly, asyncHandler(async (req, res) => {
+  const onboarding = await prisma.studentOnboarding.findUnique({
+    where: { studentId: req.user.userId },
+  });
+  if (!onboarding) return res.status(409).json({ error: 'Start onboarding before completing it.' });
+  if (onboarding.status === 'completed') {
+    const profile = await prisma.studentLearningProfile.findUnique({ where: { studentId: req.user.userId } });
+    return res.status(200).json(serializeOnboarding(onboarding, profile));
+  }
+
+  const questions = sanitizeQuestions(onboarding.questions);
+  const merged = { ...asJsonObject(onboarding.answers), ...asJsonObject(req.body?.answers) };
+  const normalized = normalizeAnswers(questions, merged);
+  if (normalized.errors.length) return res.status(400).json({ error: normalized.errors[0] });
+  if (!normalized.complete) {
+    return res.status(400).json({
+      error: 'Please answer every onboarding question before finishing.',
+      answeredCount: normalized.answeredCount,
+      questionCount: questions.length,
+    });
+  }
+
+  const generated = await generateStudentLearningProfile(questions, normalized.answers);
+  const promptContext = formatProfileForPrompt(generated.profile);
+  const completedAt = new Date();
+  const [, profile] = await prisma.$transaction([
+    prisma.studentOnboarding.update({
+      where: { studentId: req.user.userId },
+      data: {
+        answers: normalized.answers,
+        status: 'completed',
+        completedAt,
+      },
+    }),
+    prisma.studentLearningProfile.upsert({
+      where: { studentId: req.user.userId },
+      create: {
+        studentId: req.user.userId,
+        schoolId: req.user.schoolId,
+        profile: generated.profile,
+        promptContext,
+        source: generated.source,
+      },
+      update: {
+        profile: generated.profile,
+        promptContext,
+        source: generated.source,
+        version: { increment: 1 },
+      },
+    }),
+  ]);
+
+  fireAnalyticsEvent({
+    type: 'student_onboarding_completed',
+    studentId: req.user.userId,
+    schoolId: req.user.schoolId,
+    metadata: { profileSource: generated.source, questionSource: onboarding.questionSource },
+  });
+
+  const completed = { ...onboarding, status: 'completed', answers: normalized.answers, completedAt };
+  return res.status(200).json(serializeOnboarding(completed, profile));
+}));
+
+app.get('/api/ai/profile', ...studentOnly, asyncHandler(async (req, res) => {
+  const profile = await prisma.studentLearningProfile.findUnique({
+    where: { studentId: req.user.userId },
+    select: { profile: true, source: true, version: true, updatedAt: true },
+  });
+  if (!profile) return res.status(404).json({ error: 'Learning profile not found. Complete onboarding first.' });
+  return res.status(200).json(profile);
+}));
+
 function requireTeacherOrInternal(req, res, next) {
   const internalToken = req.headers['x-internal-service-token'];
   if (INTERNAL_SERVICE_TOKEN && internalToken === INTERNAL_SERVICE_TOKEN) {
@@ -78,6 +225,14 @@ function requireTeacherOrInternal(req, res, next) {
 }
 
 app.post('/api/ai/chat/session', ...studentOnly, asyncHandler(async (req, res) => {
+  const profile = await prisma.studentLearningProfile.findUnique({
+    where: { studentId: req.user.userId },
+    select: { id: true },
+  });
+  if (!profile) {
+    return res.status(428).json({ error: 'Complete your one-time learning preferences quiz before starting tutor chat.' });
+  }
+
   const subject = normalizeSubject(req.body?.subject);
   if (!subject) {
     return res.status(400).json({ error: 'subject is required and must be 1-80 characters.' });
@@ -109,8 +264,27 @@ app.post('/api/ai/chat/session', ...studentOnly, asyncHandler(async (req, res) =
 }));
 
 app.get('/api/ai/chat/sessions', ...studentOnly, asyncHandler(async (req, res) => {
+  const subject = normalizeOptionalText(req.query?.subject, 80);
+  if (subject === false) return res.status(400).json({ error: 'subject must be a string up to 80 characters.' });
+  const lessonContext = normalizeLessonContext(req.query || {});
+  if (!lessonContext.ok) return res.status(400).json({ error: lessonContext.error });
+
+  const where = { studentId: req.user.userId };
+  if (subject) where.subject = { equals: subject, mode: 'insensitive' };
+  if (lessonContext.data.board) {
+    where.board = { equals: lessonContext.data.board, mode: 'insensitive' };
+  }
+  if (lessonContext.data.curriculum) {
+    where.curriculum = { equals: lessonContext.data.curriculum, mode: 'insensitive' };
+  }
+  if (lessonContext.data.grade) where.grade = lessonContext.data.grade;
+  if (lessonContext.data.chapterNumber) where.chapterNumber = lessonContext.data.chapterNumber;
+  if (lessonContext.data.chapterName) {
+    where.chapterName = { equals: lessonContext.data.chapterName, mode: 'insensitive' };
+  }
+
   const sessions = await prisma.chatSession.findMany({
-    where: { studentId: req.user.userId },
+    where,
     orderBy: { createdAt: 'desc' },
     take: 50,
     select: {
@@ -272,16 +446,26 @@ app.post('/api/ai/chat', ...studentOnly, asyncHandler(async (req, res) => {
       return res.end();
     }
 
-    const chunks = await retrieveRagChunks({
-      q: message,
-      schoolId: session.schoolId,
-      subject: session.subject,
-      board: session.board,
-      curriculum: session.curriculum,
-      grade: session.grade,
-      chapterNumber: session.chapterNumber,
-      top: 5,
-    });
+    const [chunks, learningProfile, quizLearningContext] = await Promise.all([
+      retrieveRagChunks({
+        q: message,
+        schoolId: session.schoolId,
+        subject: session.subject,
+        board: session.board,
+        curriculum: session.curriculum,
+        grade: session.grade,
+        chapterNumber: session.chapterNumber,
+        top: 5,
+      }),
+      loadStudentLearningProfile(req.user.userId),
+      loadStudentQuizLearningContext({
+        studentId: req.user.userId,
+        schoolId: session.schoolId,
+        subject: session.subject,
+        grade: session.grade,
+        chapterNumber: session.chapterNumber,
+      }),
+    ]);
     sendSseEvent(res, 'answer_context', {
       source: chunks.length ? 'rag' : 'general',
       ragChunkCount: chunks.length,
@@ -295,6 +479,8 @@ app.post('/api/ai/chat', ...studentOnly, asyncHandler(async (req, res) => {
       history,
       question: message,
       session,
+      learningProfile,
+      quizLearningContext,
     });
 
     const llmResult = await streamLlmResponse({
@@ -1440,6 +1626,108 @@ async function loadRecentHistory(sessionId) {
   return messages.reverse();
 }
 
+async function loadStudentLearningProfile(studentId) {
+  const record = await prisma.studentLearningProfile.findUnique({
+    where: { studentId },
+    select: { profile: true, promptContext: true },
+  });
+  if (!record) return null;
+  return {
+    profile: record.profile,
+    promptContext: String(record.promptContext || '').slice(0, 2400),
+  };
+}
+
+async function loadStudentQuizLearningContext(input) {
+  if (!QUIZ_SERVICE_URL || !INTERNAL_SERVICE_TOKEN) return null;
+  try {
+    const payload = await fetchJsonWithTimeout(
+      buildQuizLearningContextUrl(QUIZ_SERVICE_URL, input),
+      {
+        method: 'GET',
+        headers: { 'X-Internal-Service-Token': INTERNAL_SERVICE_TOKEN },
+      },
+      3000
+    );
+    return normalizeQuizLearningContext(payload);
+  } catch (error) {
+    console.warn('[ai] Quiz learning context unavailable, continuing without it:', error.message);
+    return null;
+  }
+}
+
+async function generateOnboardingQuestions() {
+  if (!GEMINI_API_KEY) {
+    return { questions: sanitizeQuestions(null), source: 'fallback_no_key' };
+  }
+  try {
+    const result = await generateGeminiTextResponse({ prompt: buildQuestionGenerationPrompt() });
+    if (result.safetyBlocked) throw new Error(result.safety?.reason || 'Gemini blocked onboarding question generation.');
+    const parsed = extractJsonObject(result.content);
+    if (!Array.isArray(parsed.questions) || parsed.questions.length < 8) {
+      throw new Error('Gemini returned too few onboarding questions.');
+    }
+    return { questions: sanitizeQuestions(parsed.questions), source: 'gemini' };
+  } catch (err) {
+    console.warn('[ai] Gemini onboarding questions unavailable, using fallback:', err.message);
+    return { questions: sanitizeQuestions(null), source: 'fallback_provider_error' };
+  }
+}
+
+async function generateStudentLearningProfile(questions, answers) {
+  const fallback = buildFallbackProfile(answers, questions);
+  if (!GEMINI_API_KEY) return { profile: fallback, source: 'fallback_no_key' };
+  try {
+    const result = await generateGeminiTextResponse({
+      prompt: buildProfileGenerationPrompt(questions, answers),
+    });
+    if (result.safetyBlocked) throw new Error(result.safety?.reason || 'Gemini blocked profile generation.');
+    const parsed = extractJsonObject(result.content);
+    return {
+      profile: sanitizeLearningProfile(parsed, answers, questions),
+      source: 'gemini',
+    };
+  } catch (err) {
+    console.warn('[ai] Gemini learning profile unavailable, using fallback:', err.message);
+    return { profile: fallback, source: 'fallback_provider_error' };
+  }
+}
+
+function serializeOnboarding(onboarding, profile) {
+  if (!onboarding) {
+    return {
+      required: true,
+      status: 'not_started',
+      estimatedMinutes: 10,
+      questionCount: 10,
+      answeredCount: 0,
+    };
+  }
+  const questions = sanitizeQuestions(onboarding.questions);
+  const normalized = normalizeAnswers(questions, onboarding.answers);
+  return {
+    required: onboarding.status !== 'completed',
+    status: onboarding.status,
+    estimatedMinutes: 10,
+    questionSource: onboarding.questionSource,
+    questions,
+    answers: normalized.answers,
+    questionCount: questions.length,
+    answeredCount: normalized.answeredCount,
+    startedAt: onboarding.startedAt,
+    completedAt: onboarding.completedAt,
+    profile: profile ? {
+      summary: profile.profile?.summary || null,
+      version: profile.version,
+      updatedAt: profile.updatedAt,
+    } : null,
+  };
+}
+
+function asJsonObject(value) {
+  return value && typeof value === 'object' && !Array.isArray(value) ? value : {};
+}
+
 async function retrieveRagChunks({ q, schoolId, subject, board, curriculum, grade, chapterNumber, top }) {
   const params = new URLSearchParams({
     q,
@@ -1475,7 +1763,7 @@ async function retrieveRagChunks({ q, schoolId, subject, board, curriculum, grad
   }
 }
 
-function buildTutorPrompt({ chunks, history, question, session }) {
+function buildTutorPrompt({ chunks, history, question, session, learningProfile, quizLearningContext }) {
   const hasChunks = chunks.length > 0;
   const ragContext = hasChunks
     ? chunks.map((chunk, index) => `[${index + 1}] ${chunk.text} (source: ${chunk.source})`).join('\n\n')
@@ -1485,6 +1773,9 @@ function buildTutorPrompt({ chunks, history, question, session }) {
     ? history.map(message => `${message.role === 'user' ? 'User' : 'Assistant'}: ${message.content}`).join('\n')
     : 'No previous conversation.';
   const lessonContext = formatLessonContextForPrompt(session);
+  const personalizationContext = learningProfile?.promptContext
+    || formatProfileForPrompt(learningProfile?.profile);
+  const academicPersonalizationContext = formatQuizLearningContextForPrompt(quizLearningContext);
 
   const noContextRule = hasChunks
     ? [
@@ -1519,6 +1810,12 @@ ${noContextRule}
 
 Lesson context:
 ${lessonContext}
+
+Student learning preferences:
+${personalizationContext}
+
+Recent quiz-informed academic personalization:
+${academicPersonalizationContext}
 
 Context:
 ${ragContext}

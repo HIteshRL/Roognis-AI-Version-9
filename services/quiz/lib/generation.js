@@ -37,7 +37,7 @@ async function generateQuizForSource(prisma, sourceInput, options = {}) {
   if (!source) throw new Error('Chapter quiz source not found.');
 
   const activeQuiz = await findActiveQuiz(prisma, source);
-  if (!needsGeneration(source, activeQuiz)) {
+  if (!options.force && !needsGeneration(source, activeQuiz)) {
     if (source.quizStatus !== 'ready' || source.activeQuizId !== activeQuiz.id) {
       await prisma.chapterQuizSource.update({
         where: { id: source.id },

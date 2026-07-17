@@ -8,6 +8,24 @@ const DIFFICULTY_WEIGHTS = [
   ['hard', 0.2],
 ];
 
+const NAVIGATION_TRIVIA_PATTERNS = [
+  /\b(?:write|state|name|identify|give)\s+(?:the\s+)?(?:heading|title|section name)\b/i,
+  /\bwhat\s+(?:is|was)\s+(?:the\s+)?(?:heading|title|section name)\b/i,
+  /\b(?:heading|title)\s+(?:used|given|shown|mentioned)\b/i,
+  /\bsection\s+\d+(?:\.\d+)*\b/i,
+  /\bpage\s+(?:number\s+)?\d+\b/i,
+  /\b(?:figure|table|diagram)\s+\d+(?:\.\d+)*\b/i,
+  /\b(?:in|from|according to)\s+(?:this|the)\s+(?:chapter|section|page|textbook|passage)\b/i,
+  /\b(?:above|below)\s+(?:passage|figure|table|diagram|text)\b/i,
+  /\bwhat\s+(?:comes|appears)\s+(?:before|after)\b/i,
+];
+
+const WEAK_MCQ_OPTION_PATTERNS = [
+  /^(?:all|none) of the above[.!]?$/i,
+  /^(?:all|none) of these[.!]?$/i,
+  /^(?:both|either) [a-d](?: and| or) [a-d][.!]?$/i,
+];
+
 const quizDraftSchema = {
   type: 'object',
   additionalProperties: false,
@@ -136,10 +154,10 @@ function normalizeQuizDraftRequest(body = {}) {
     }
   }
 
-  const sourceChunks = chunks
+  const normalizedChunks = chunks
     .map((chunk, index) => normalizeSourceChunk(chunk, index))
-    .filter(Boolean)
-    .slice(0, 40);
+    .filter(Boolean);
+  const sourceChunks = evenlySample(normalizedChunks, 40);
 
   if (sourceChunks.length < 2) {
     throw new Error('At least two chapter context chunks are required for quiz generation.');
@@ -163,6 +181,16 @@ function normalizeQuizDraftRequest(body = {}) {
     difficultyCounts,
     teacherId: cleanOptionalString(body.teacherId),
   };
+}
+
+function evenlySample(items, limit) {
+  if (!Array.isArray(items) || !items.length || limit <= 0) return [];
+  if (items.length <= limit) return items;
+  if (limit === 1) return [items[0]];
+  const lastIndex = items.length - 1;
+  return Array.from({ length: limit }, (_unused, position) => (
+    items[Math.round(position * lastIndex / (limit - 1))]
+  ));
 }
 
 function normalizeDifficultyCounts(counts, questionCount) {
@@ -212,65 +240,135 @@ async function generateQuizDraft({ payload, config = {}, fetchFn = fetch }) {
   const reasoningEffort = config.reasoningEffort || process.env.OPENROUTER_QUIZ_REASONING_EFFORT || 'medium';
   const timeoutMs = Number(config.timeoutMs || process.env.OPENROUTER_QUIZ_TIMEOUT_MS || 60000);
   const maxCompletionTokens = Number(config.maxCompletionTokens || process.env.OPENROUTER_QUIZ_MAX_COMPLETION_TOKENS || 4200);
+  const maxQualityAttempts = normalizeQualityAttempts(
+    config.maxQualityAttempts || process.env.OPENROUTER_QUIZ_QUALITY_ATTEMPTS || 2
+  );
+  const qualityReviewEnabled = config.qualityReview !== false
+    && String(process.env.OPENROUTER_QUIZ_QUALITY_REVIEW || 'true').toLowerCase() !== 'false';
   const baseUrl = normalizeOpenRouterBaseUrl(config.baseUrl || process.env.OPENROUTER_API_BASE_URL || DEFAULT_OPENROUTER_BASE_URL);
+  let rejectionReason = '';
 
-  const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), timeoutMs);
-
-  try {
-    const response = await fetchFn(`${baseUrl}${OPENROUTER_CHAT_COMPLETIONS_PATH}`, {
-      method: 'POST',
-      headers: {
-        Authorization: `Bearer ${apiKey}`,
-        'Content-Type': 'application/json',
-        ...openRouterAttributionHeaders(config),
-      },
-      body: JSON.stringify({
-        model,
-        messages: [
-          { role: 'system', content: buildQuizSystemPrompt() },
-          { role: 'user', content: buildQuizUserPrompt(normalized) },
-        ],
-        response_format: {
-          type: 'json_schema',
-          json_schema: {
-            name: 'chapter_quiz_draft',
-            description: 'A grounded, age-appropriate chapter quiz draft for teacher review.',
-            strict: true,
-            schema: quizDraftSchema,
+  const requestCompletion = async messages => {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), timeoutMs);
+    try {
+      const response = await fetchFn(`${baseUrl}${OPENROUTER_CHAT_COMPLETIONS_PATH}`, {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${apiKey}`,
+          'Content-Type': 'application/json',
+          ...openRouterAttributionHeaders(config),
+        },
+        body: JSON.stringify({
+          model,
+          messages,
+          response_format: {
+            type: 'json_schema',
+            json_schema: {
+              name: 'chapter_quiz_draft',
+              description: 'A grounded, age-appropriate chapter quiz draft for teacher review.',
+              strict: true,
+              schema: quizDraftSchema,
+            },
           },
-        },
-        provider: {
-          require_parameters: true,
-        },
-        reasoning: {
-          effort: reasoningEffort,
-        },
-        max_completion_tokens: maxCompletionTokens,
-      }),
-      signal: controller.signal,
-    });
+          provider: { require_parameters: true },
+          reasoning: { effort: reasoningEffort },
+          max_completion_tokens: maxCompletionTokens,
+        }),
+        signal: controller.signal,
+      });
+      if (!response.ok) {
+        const errorBody = await response.text().catch(() => '');
+        throw new Error(`OpenRouter quiz generation failed with ${response.status}: ${errorBody}`);
+      }
+      const raw = await response.json();
+      const text = extractResponseText(raw);
+      if (!text) throw new Error('OpenRouter quiz generation returned no output text.');
+      return { raw, text };
+    } finally {
+      clearTimeout(timeout);
+    }
+  };
 
-    if (!response.ok) {
-      const errorBody = await response.text().catch(() => '');
-      throw new Error(`OpenRouter quiz generation failed with ${response.status}: ${errorBody}`);
+  for (let attempt = 1; attempt <= maxQualityAttempts; attempt += 1) {
+    const messages = [
+      { role: 'system', content: buildQuizSystemPrompt() },
+      { role: 'user', content: buildQuizUserPrompt(normalized) },
+    ];
+    if (rejectionReason) {
+      messages.push({
+        role: 'user',
+        content: [
+          'Your previous draft was rejected by the automatic assessment-quality gate.',
+          `Rejection reason: ${rejectionReason}`,
+          'Regenerate the entire quiz with different questions.',
+          'Do not ask about headings, titles, section/page/figure numbers, document order, exact textbook wording, or where content appears.',
+          'Every replacement must directly assess a science concept, process, application, or cause-and-effect relationship.',
+        ].join('\n'),
+      });
     }
 
-    const raw = await response.json();
-    const text = extractResponseText(raw);
-    if (!text) throw new Error('OpenRouter quiz generation returned no output text.');
+    const generated = await requestCompletion(messages);
+    try {
+      const draft = repairQuizDraftCitations(JSON.parse(generated.text), normalized);
+      validateQuizDraft(draft, normalized);
 
-    const draft = repairQuizDraftCitations(JSON.parse(text), normalized);
-    validateQuizDraft(draft, normalized);
-    return {
-      draft,
-      model: raw.model || model,
-      usage: raw.usage || null,
-      difficultyCounts: normalized.difficultyCounts,
-    };
-  } finally {
-    clearTimeout(timeout);
+      if (qualityReviewEnabled) {
+        const review = await requestCompletion([
+          ...messages,
+          { role: 'assistant', content: JSON.stringify(draft) },
+          { role: 'user', content: buildQuizReviewPrompt() },
+        ]);
+        const reviewedDraft = repairQuizDraftCitations(JSON.parse(review.text), normalized);
+        validateQuizDraft(reviewedDraft, normalized);
+        return {
+          draft: reviewedDraft,
+          model: review.raw.model || generated.raw.model || model,
+          usage: review.raw.usage || generated.raw.usage || null,
+          difficultyCounts: normalized.difficultyCounts,
+          qualityAttempts: attempt,
+          qualityReviewed: true,
+        };
+      }
+
+      return {
+        draft,
+        model: generated.raw.model || model,
+        usage: generated.raw.usage || null,
+        difficultyCounts: normalized.difficultyCounts,
+        qualityAttempts: attempt,
+        qualityReviewed: false,
+      };
+    } catch (error) {
+      rejectionReason = error.message || 'The draft did not meet assessment-quality rules.';
+      if (attempt === maxQualityAttempts) {
+        throw new Error(`Quiz draft failed quality validation after ${attempt} attempts: ${rejectionReason}`);
+      }
+    }
   }
+
+  throw new Error('Quiz draft generation exhausted all quality attempts.');
+}
+
+function buildQuizReviewPrompt() {
+  return [
+    'Act as the final assessment editor. Return the complete revised quiz JSON, not comments.',
+    'Replace any question that tests textbook layout, exact wording, headings, sections, page order, or trivial details.',
+    'Check every MCQ distractor individually. A distractor is acceptable only if a learner with a realistic misconception about the same concept might choose it.',
+    'Replace joke, absurd, unrelated, obviously impossible, or grammatically mismatched options.',
+    'Keep all four MCQ options in the same conceptual category and at a similar level of detail.',
+    'Make medium questions require application or explanation and hard questions require multi-step cause-and-effect reasoning.',
+    'Ensure every question is self-contained, scientifically grounded in the supplied chapter context, and useful for diagnosing understanding.',
+    'Preserve the exact question count and simple/medium/hard distribution.',
+  ].join('\n');
+}
+
+function normalizeQualityAttempts(value) {
+  const numeric = Number(value);
+  if (!Number.isInteger(numeric) || numeric < 1 || numeric > 3) {
+    throw new Error('OPENROUTER_QUIZ_QUALITY_ATTEMPTS must be an integer from 1 to 3.');
+  }
+  return numeric;
 }
 
 function assertOpenRouterOpenAiModel(model) {
@@ -302,7 +400,12 @@ function buildQuizSystemPrompt() {
     'Simple questions should test recall and direct understanding.',
     'Medium questions should require applying, comparing, or explaining ideas.',
     'Hard questions should require real thinking for the grade: multi-step reasoning, analysis, or transfer to a new but familiar situation.',
+    'Assess science understanding, not the layout or wording of the textbook.',
+    'Never ask for a heading, title, section number, page number, figure/table number, exact sentence, or where information appears.',
+    'Every question must be self-contained and answerable without seeing the source page, an omitted diagram, or an earlier question.',
     'Avoid trivia, trick wording, duplicate questions, unsupported facts, and answer choices that are obviously wrong.',
+    'MCQ distractors must be plausible misconceptions, grammatically parallel, and similar in specificity to the correct answer.',
+    'Do not use joke answers, absurd distractors, or all/none-of-the-above options.',
     'Keep every answer explanation useful but compact: one sentence, maximum 14 words.',
   ].join('\n');
 }
@@ -331,6 +434,10 @@ function buildQuizUserPrompt(request) {
     'Use a healthy mix of MCQ and short-answer questions. MCQs must have exactly four options and the correctAnswer must exactly match one option. Short-answer questions must have an empty options array.',
     'Cover the full chapter: definitions, core concepts, processes, activities/examples, applications, diagrams/tables when present, and exercises/key points.',
     'Prefer concept-level coverage over page-order repetition.',
+    'Ignore chunks that contain only headings, page furniture, exercise numbering, captions, or document-navigation text.',
+    'Simple questions must still test a science fact or concept; never test whether a learner remembers the document structure.',
+    'For medium and hard questions, use familiar real-life situations and require explanation, prediction, comparison, or cause-and-effect reasoning.',
+    'If a diagram or table is not reproduced inside the question, do not refer to it.',
     'Use grade-level language and thinking depth.',
     'Set weakAreaLabel to the smallest useful remediation topic a teacher could act on.',
     'Keep chapterSummary under 20 words, coverage to exactly 5 concepts, and concept/weak-area labels under 5 words.',
@@ -490,6 +597,7 @@ function validateQuizDraft(draft, request) {
     if (!promptKey || promptKey.length < 12) throw new Error(`${prefix}.prompt is too short.`);
     if (seenPrompts.has(promptKey)) throw new Error(`${prefix}.prompt duplicates another question.`);
     seenPrompts.add(promptKey);
+    validateQuestionQuality(question, prefix);
 
     if (!question.conceptTag || !question.weakAreaLabel) {
       throw new Error(`${prefix} must include conceptTag and weakAreaLabel.`);
@@ -508,6 +616,16 @@ function validateQuizDraft(draft, request) {
       if (!Array.isArray(question.options) || question.options.length !== 4) {
         throw new Error(`${prefix}.options must contain exactly four options for MCQ.`);
       }
+      const normalizedOptions = question.options.map(normalizeForDuplicateCheck);
+      if (normalizedOptions.some(option => !option)) {
+        throw new Error(`${prefix}.options must not be empty.`);
+      }
+      if (new Set(normalizedOptions).size !== normalizedOptions.length) {
+        throw new Error(`${prefix}.options must be distinct.`);
+      }
+      if (question.options.some(option => WEAK_MCQ_OPTION_PATTERNS.some(pattern => pattern.test(String(option).trim())))) {
+        throw new Error(`${prefix}.options must use plausible content-based distractors.`);
+      }
       if (!question.options.includes(question.correctAnswer)) {
         throw new Error(`${prefix}.correctAnswer must exactly match one MCQ option.`);
       }
@@ -525,6 +643,21 @@ function validateQuizDraft(draft, request) {
   return true;
 }
 
+function validateQuestionQuality(question, prefix = 'question') {
+  const prompt = String(question?.prompt || '').trim();
+  const metaText = [question?.conceptTag, question?.weakAreaLabel]
+    .filter(Boolean)
+    .join(' ');
+
+  if (NAVIGATION_TRIVIA_PATTERNS.some(pattern => pattern.test(prompt))) {
+    throw new Error(`${prefix}.prompt tests document navigation instead of subject understanding.`);
+  }
+  if (/\b(?:heading recall|section heading|document structure|page location)\b/i.test(metaText)) {
+    throw new Error(`${prefix} uses a document-navigation concept label.`);
+  }
+  return true;
+}
+
 function normalizeForDuplicateCheck(value) {
   return String(value || '')
     .toLowerCase()
@@ -536,6 +669,7 @@ module.exports = {
   DEFAULT_QUIZ_QUESTION_COUNT,
   quizDraftSchema,
   buildDifficultyPlan,
+  evenlySample,
   normalizeQuizDraftRequest,
   generateQuizDraft,
   assertOpenRouterOpenAiModel,
@@ -543,5 +677,6 @@ module.exports = {
   buildQuizUserPrompt,
   extractResponseText,
   repairQuizDraftCitations,
+  validateQuestionQuality,
   validateQuizDraft,
 };

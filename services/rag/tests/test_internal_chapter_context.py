@@ -1,4 +1,10 @@
+from main import evenly_sample_items
 from test_documents import upload_pdf
+
+
+def test_evenly_samples_context_across_the_whole_chapter():
+    items = list(range(100))
+    assert evenly_sample_items(items, 5) == [0, 25, 50, 74, 99]
 
 
 INTERNAL_HEADERS = {"X-Internal-Service-Token": "test-internal-token"}

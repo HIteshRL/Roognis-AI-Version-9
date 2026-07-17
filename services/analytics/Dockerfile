@@ -1,5 +1,8 @@
 FROM node:20-alpine
 WORKDIR /app
+ENV NPM_CONFIG_STRICT_SSL=false \
+    NPM_CONFIG_REGISTRY=https://registry.yarnpkg.com \
+    NPM_CONFIG_REPLACE_REGISTRY_HOST=always
 
 # openssl required by Prisma query engine on Alpine (same as auth/ai services)
 RUN apk add --no-cache curl openssl

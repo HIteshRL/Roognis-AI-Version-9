@@ -195,6 +195,18 @@ LLM_PROVIDER=ollama IMAGE_PROVIDER=comfyui docker-compose --profile local-ai up 
 
 Log in with any demo account. The browser will redirect you to the correct dashboard for your role.
 
+### First-time student personalization
+
+Every student completes a one-time, non-academic learning-preferences quiz before opening tutor chat. The flow takes about 10 minutes, saves progress after each answer, and resumes after an interrupted session.
+
+- `GET /api/ai/onboarding` returns the current one-time onboarding state.
+- `POST /api/ai/onboarding/start` creates a safe set of questions. Gemini is used when `GEMINI_API_KEY` is configured; a validated built-in set keeps onboarding available if the provider is unavailable.
+- `PATCH /api/ai/onboarding/answers` persists resumable answers.
+- `POST /api/ai/onboarding/complete` creates and stores a structured learning profile.
+- `GET /api/ai/profile` returns the authenticated student's current profile.
+
+The AI service loads the stored profile for every tutor request and adds a bounded personalization section to the hidden tutor prompt. Preferences are treated as suggestions rather than measures of ability, and student free text is filtered before it can become persistent prompt context.
+
 ---
 
 ## EKE Ingestion Setup and Verification
@@ -235,6 +247,25 @@ LLM_PROVIDER=ollama IMAGE_PROVIDER=comfyui docker-compose --profile local-ai up 
 5. Click `Upload`.
 6. Watch the latest upload panel move through upload/processing states until it shows `Ready for retrieval` or a failure message.
 7. Use `Refresh` or the status icon beside any document to reload document status, entity count, chunk count, and ready/failed state.
+
+### Automatic Grade 8 textbook seed
+
+The repository includes chapter PDFs and metadata for the Grade 8 NCERT Science,
+Ganita Prakash Mathematics, and the currently published *Exploring Society: India
+and Beyond Part 1* Social Science books under `seed-data/ncert/`.
+
+`docker-compose up --build` starts the one-shot `textbook-seed` service. It signs in
+with the demo teacher, checks the school's ready RAG documents, skips matching
+chapters, and uploads only missing chapters. The frontend can start while first-time
+ingestion continues. Follow progress with:
+
+```sh
+docker-compose logs -f textbook-seed
+```
+
+The seeder is idempotent, so restarting the stack does not duplicate ready chapters.
+Set `AUTO_SEED_TEXTBOOKS=false` to disable it. If demo credentials are changed, set
+`SEED_TEACHER_EMAIL` and `SEED_TEACHER_PASSWORD` to a valid teacher account.
 
 ### Curl examples
 
@@ -446,21 +477,25 @@ The retrieve endpoint is called internally by the AI Service without JWT. Docume
 
 ### Quiz Service — Current Surface
 
-**Files:** `services/quiz/server.js`, `services/quiz/lib/generation.js`, `services/quiz/prisma/schema.prisma`
+**Files:** `services/quiz/server.js`, `services/quiz/lib/generation.js`, `services/quiz/lib/student-learning.js`, `services/quiz/prisma/schema.prisma`
 
-**Schema:** `quiz_db` — chapter sources, generation jobs, quizzes, and quiz questions
+**Schema:** `quiz_db` — chapter sources, generation jobs, quizzes, questions, and student attempts
 
 Implemented endpoints:
 
 | Method | Path | Auth | Description |
 |---|---|---|---|
 | `POST` | `/api/quiz/internal/chapter-ready` | Internal token | Upsert ready chapter source and queue generation |
+| `GET` | `/api/quiz/internal/student-learning-context` | Internal token | Return active-quiz weak areas scoped to one student and lesson |
 | `POST` | `/api/quiz/backfill` | Teacher JWT | Discover ready RAG chapters and queue missing quizzes |
 | `GET` | `/api/quiz/chapters` | Teacher JWT | List chapter quiz generation status |
 | `POST` | `/api/quiz/sources/:sourceId/generate` | Teacher JWT | Retry/generate one chapter quiz |
 | `GET` | `/api/quiz/:quizId` | Teacher JWT | Review quiz with answers and explanations |
 | `GET` | `/api/quiz/student/chapters` | Student JWT | List ready quizzes without answers |
 | `GET` | `/api/quiz/student/quizzes/:quizId` | Student JWT | Open a ready quiz without answers |
+| `POST` | `/api/quiz/student/quizzes/:quizId/submit` | Student JWT | Grade and persist an attempt with weak-area signals |
+
+For each tutor message, the AI Service requests the current student's active-quiz signals using the selected subject, grade, and chapter. Gemini receives a bounded academic-personalization section alongside the one-time onboarding learning preferences. Archived quiz attempts are excluded, repeated labels are deduplicated per attempt, instruction-like labels are dropped, and tutor chat continues without quiz context if the Quiz Service is unavailable.
 
 Detailed contract: `docs/backend-services/RAG_EKE_INGESTION_CONTRACT.md`.
 

@@ -1,6 +1,9 @@
 # ── Stage 1: Install dependencies ────────────────────────────────────────────
 FROM node:20-alpine AS deps
 WORKDIR /app
+ENV NPM_CONFIG_STRICT_SSL=false \
+    NPM_CONFIG_REGISTRY=https://registry.yarnpkg.com \
+    NPM_CONFIG_REPLACE_REGISTRY_HOST=always
 
 COPY package.json package-lock.json* ./
 RUN npm install --legacy-peer-deps
@@ -8,6 +11,9 @@ RUN npm install --legacy-peer-deps
 # ── Stage 2: Production image ────────────────────────────────────────────────
 FROM node:20-alpine AS runner
 WORKDIR /app
+ENV NPM_CONFIG_STRICT_SSL=false \
+    NPM_CONFIG_REGISTRY=https://registry.yarnpkg.com \
+    NPM_CONFIG_REPLACE_REGISTRY_HOST=always
 
 RUN apk add --no-cache curl openssl
 

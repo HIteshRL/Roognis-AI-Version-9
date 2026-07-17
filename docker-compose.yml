@@ -20,7 +20,7 @@ services:
       - "8080:8080"  # Dashboard
     volumes:
       - ./traefik/traefik.yml:/etc/traefik/traefik.yml:ro
-      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - ${DOCKER_SOCKET_PATH:-/var/run/docker.sock}:/var/run/docker.sock:ro
     restart: unless-stopped
 
   # ── Databases ───────────────────────────────────────────────────────────────
@@ -138,12 +138,14 @@ services:
       VIDEO_TRUSTED_CHANNELS: ${VIDEO_TRUSTED_CHANNELS:-}
       OLLAMA_URL: "http://ollama:11434"
       RAG_SERVICE_URL: "http://rag:3003"
+      QUIZ_SERVICE_URL: "http://quiz:3005"
       ANALYTICS_URL: "http://analytics:3004"
       INTERNAL_SERVICE_TOKEN: ${INTERNAL_SERVICE_TOKEN}
       COMFYUI_URL: "http://comfyui:8188"
       FILE_STORAGE_PATH: /app/storage
       PORT: 3002
       NODE_ENV: production
+      NODE_TLS_REJECT_UNAUTHORIZED: "0"
       # Local fallback providers remain available with:
       # LLM_PROVIDER=ollama IMAGE_PROVIDER=comfyui docker-compose --profile local-ai up --build
       # Cloud swap — set to use S3 instead of Docker volume
@@ -192,6 +194,12 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:3003/health || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 20s
     labels:
       - "traefik.enable=true"
       - "traefik.http.routers.rag.rule=PathPrefix(`/api/rag`)"
@@ -199,6 +207,25 @@ services:
       - "traefik.http.services.rag.loadbalancer.server.port=3003"
       - "traefik.http.routers.rag.middlewares=cors@file"
     restart: unless-stopped
+
+  textbook-seed:
+    build: ./services/rag
+    command: ["python", "seed_textbooks.py"]
+    environment:
+      AUTH_SERVICE_URL: "http://auth:3001"
+      RAG_SERVICE_URL: "http://rag:3003"
+      TEXTBOOK_SEED_MANIFEST: "/app/seed-data/ncert/class-8-textbooks.json"
+      AUTO_SEED_TEXTBOOKS: ${AUTO_SEED_TEXTBOOKS:-true}
+      SEED_TEACHER_EMAIL: ${SEED_TEACHER_EMAIL:-teacher@demo.com}
+      SEED_TEACHER_PASSWORD: ${SEED_TEACHER_PASSWORD:-demo1234}
+    volumes:
+      - ./seed-data:/app/seed-data:ro
+    depends_on:
+      auth:
+        condition: service_healthy
+      rag:
+        condition: service_healthy
+    restart: "no"
 
   quiz:
     build: ./services/quiz
@@ -271,6 +298,8 @@ services:
     depends_on:
       auth:
         condition: service_healthy
+      textbook-seed:
+        condition: service_started
     labels:
       - "traefik.enable=true"
       - "traefik.http.routers.frontend.rule=PathPrefix(`/`)"

@@ -898,6 +898,199 @@
       gap: 16px;
     }
 
+    .tutor-library {
+      display: grid;
+      gap: 24px;
+    }
+
+    .tutor-library .page-head {
+      margin-bottom: 0;
+    }
+
+    .subject-card-grid {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 18px;
+    }
+
+    .subject-card {
+      position: relative;
+      min-height: 330px;
+      padding: 0;
+      overflow: hidden;
+      display: grid;
+      grid-template-rows: minmax(0, 1fr) auto;
+      border: 1px solid var(--line);
+      border-radius: 18px;
+      background: #ffffff;
+      text-align: left;
+      cursor: pointer;
+      box-shadow: 0 12px 30px rgba(32, 53, 41, 0.08);
+      transition: transform 180ms ease, box-shadow 180ms ease, border-color 180ms ease;
+    }
+
+    .subject-card:hover,
+    .subject-card:focus-visible {
+      transform: translateY(-4px);
+      border-color: #a9c0b1;
+      box-shadow: 0 18px 38px rgba(32, 53, 41, 0.14);
+      outline: none;
+    }
+
+    .subject-card-media {
+      min-height: 220px;
+      background: #e8efe9 center / cover no-repeat;
+    }
+
+    .subject-card-copy {
+      padding: 18px;
+      display: grid;
+      grid-template-columns: 1fr auto;
+      gap: 7px 12px;
+      align-items: center;
+    }
+
+    .subject-card-copy strong {
+      font-size: 22px;
+      line-height: 1.15;
+    }
+
+    .subject-card-copy span {
+      color: var(--muted);
+      font-size: 13px;
+      font-weight: 680;
+    }
+
+    .subject-card-arrow {
+      grid-column: 2;
+      grid-row: 1 / span 2;
+      width: 38px;
+      height: 38px;
+      display: grid;
+      place-items: center;
+      border-radius: 50%;
+      color: #ffffff !important;
+      background: var(--green);
+      font-size: 20px !important;
+    }
+
+    .chapter-browser {
+      display: grid;
+      gap: 16px;
+    }
+
+    .chapter-browser-head {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 16px;
+    }
+
+    .chapter-browser-head h2 {
+      margin: 4px 0 0;
+      font-size: clamp(24px, 3vw, 34px);
+    }
+
+    .chapter-card-grid {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 16px;
+    }
+
+    .chapter-card {
+      padding: 0;
+      overflow: hidden;
+      display: grid;
+      border: 1px solid var(--line);
+      border-radius: 16px;
+      background: #ffffff;
+      text-align: left;
+      cursor: pointer;
+      transition: transform 160ms ease, box-shadow 160ms ease, border-color 160ms ease;
+    }
+
+    .chapter-card:hover,
+    .chapter-card:focus-visible {
+      transform: translateY(-3px);
+      border-color: #a9c0b1;
+      box-shadow: 0 14px 30px rgba(32, 53, 41, 0.12);
+      outline: none;
+    }
+
+    .chapter-card-media {
+      position: relative;
+      min-height: 148px;
+      overflow: hidden;
+      background: #dfeae2 center / cover no-repeat;
+    }
+
+    .chapter-card-media::after {
+      content: '';
+      position: absolute;
+      inset: 0;
+      background: linear-gradient(180deg, transparent 40%, rgba(10, 35, 24, 0.42));
+    }
+
+    .chapter-topic-icon {
+      position: absolute;
+      z-index: 1;
+      right: 12px;
+      bottom: 10px;
+      width: 44px;
+      height: 44px;
+      display: grid;
+      place-items: center;
+      border: 1px solid rgba(255, 255, 255, 0.72);
+      border-radius: 14px;
+      background: rgba(255, 255, 255, 0.9);
+      box-shadow: 0 5px 16px rgba(21, 45, 31, 0.18);
+      font-size: 23px;
+    }
+
+    .chapter-card-copy {
+      padding: 15px;
+      display: grid;
+      gap: 7px;
+    }
+
+    .chapter-number {
+      color: var(--green);
+      font-size: 11px;
+      font-weight: 850;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+    }
+
+    .chapter-card-copy strong {
+      min-height: 44px;
+      font-size: 17px;
+      line-height: 1.25;
+    }
+
+    .chapter-card-meta {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
+      color: var(--muted);
+      font-size: 12px;
+      font-weight: 680;
+    }
+
+    .tutor-chat-workspace {
+      min-height: 0;
+    }
+
+    .active-lesson-heading {
+      display: flex;
+      align-items: flex-start;
+      gap: 12px;
+    }
+
+    .active-lesson-heading h1 {
+      margin-bottom: 5px;
+    }
+
     @media (min-width: 1101px) {
       #student-tutor.view.active {
         height: calc(100vh - 124px);
@@ -905,6 +1098,18 @@
         display: flex;
         flex-direction: column;
         overflow: hidden;
+      }
+
+      #student-tutor.view.active.library-mode {
+        height: auto;
+        overflow: visible;
+      }
+
+      #student-tutor .tutor-chat-workspace:not(.hidden) {
+        flex: 1;
+        min-height: 0;
+        display: flex;
+        flex-direction: column;
       }
 
       #student-tutor .page-head {
@@ -1318,8 +1523,19 @@
       .chat-input,
       .form-grid,
       .library-summary,
-      .prompt-row {
+      .prompt-row,
+      .subject-card-grid,
+      .chapter-card-grid {
         grid-template-columns: 1fr;
+      }
+
+      .subject-card {
+        min-height: 290px;
+      }
+
+      .chapter-browser-head {
+        align-items: flex-start;
+        flex-direction: column;
       }
 
       .span-3,
@@ -1354,6 +1570,136 @@
       .message {
         max-width: 100%;
       }
+    }
+    .onboarding-screen {
+      min-height: 100vh;
+      padding: 28px;
+      display: grid;
+      place-items: center;
+      background: linear-gradient(150deg, #eef5ef, #f8f6ed 55%, #edf3f7);
+    }
+
+    .onboarding-card {
+      width: min(760px, 100%);
+      border: 1px solid var(--line);
+      border-radius: 16px;
+      background: rgba(255, 255, 255, 0.97);
+      box-shadow: var(--shadow);
+      overflow: hidden;
+    }
+
+    .onboarding-header {
+      padding: 24px 28px 20px;
+      display: flex;
+      align-items: flex-start;
+      justify-content: space-between;
+      gap: 20px;
+      border-bottom: 1px solid var(--line);
+    }
+
+    .onboarding-header h1 {
+      margin-bottom: 7px;
+      font-size: clamp(25px, 4vw, 34px);
+    }
+
+    .onboarding-time {
+      flex: 0 0 auto;
+      padding: 8px 11px;
+      border-radius: 999px;
+      color: var(--green-dark);
+      background: var(--soft);
+      font-size: 12px;
+      font-weight: 820;
+    }
+
+    .onboarding-progress-track {
+      height: 8px;
+      background: #e7ece8;
+    }
+
+    .onboarding-progress-bar {
+      width: 0;
+      height: 100%;
+      background: var(--green);
+      transition: width 180ms ease;
+    }
+
+    .onboarding-body {
+      padding: 30px 28px 26px;
+    }
+
+    .onboarding-step {
+      margin-bottom: 10px;
+      color: var(--green-dark);
+      font-size: 12px;
+      font-weight: 820;
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+    }
+
+    .onboarding-question h2 {
+      margin-bottom: 8px;
+      font-size: clamp(21px, 3vw, 27px);
+      line-height: 1.3;
+    }
+
+    .onboarding-options {
+      margin-top: 22px;
+      display: grid;
+      gap: 10px;
+    }
+
+    .onboarding-option {
+      min-height: 50px;
+      padding: 12px 14px;
+      display: flex;
+      align-items: center;
+      gap: 11px;
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      background: #fbfcfb;
+      color: var(--ink);
+      font-size: 14px;
+      font-weight: 700;
+      cursor: pointer;
+    }
+
+    .onboarding-option:has(input:checked) {
+      border-color: #89ad96;
+      background: #edf6ef;
+      box-shadow: 0 0 0 2px rgba(62, 125, 91, 0.08);
+    }
+
+    .onboarding-option input {
+      width: 18px;
+      height: 18px;
+      accent-color: var(--green);
+    }
+
+    .onboarding-answer {
+      margin-top: 22px;
+      min-height: 116px;
+    }
+
+    .onboarding-actions {
+      margin-top: 28px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+    }
+
+    .onboarding-actions-right {
+      display: flex;
+      gap: 10px;
+    }
+
+    @media (max-width: 620px) {
+      .onboarding-screen { padding: 12px; }
+      .onboarding-header, .onboarding-body { padding-left: 19px; padding-right: 19px; }
+      .onboarding-header { flex-direction: column; }
+      .onboarding-actions { align-items: stretch; flex-direction: column-reverse; }
+      .onboarding-actions-right { display: grid; grid-template-columns: 1fr 1fr; }
     }
   </style>
 </head>
@@ -1390,6 +1736,34 @@
         </form>
 
       </main>
+    </div>
+  </section>
+
+  <section class="onboarding-screen hidden" id="onboarding-screen">
+    <div class="onboarding-card">
+      <header class="onboarding-header">
+        <div>
+          <p class="eyebrow">One-time setup</p>
+          <h1>Help Roognis teach your way.</h1>
+          <p class="subtext">This is not a test. There are no right or wrong answers.</p>
+        </div>
+        <span class="onboarding-time">About 10 minutes</span>
+      </header>
+      <div class="onboarding-progress-track" aria-hidden="true">
+        <div class="onboarding-progress-bar" id="onboarding-progress-bar"></div>
+      </div>
+      <form class="onboarding-body" id="onboarding-form">
+        <div class="onboarding-step" id="onboarding-step">Question 1 of 10</div>
+        <div class="onboarding-question" id="onboarding-question"></div>
+        <div class="form-status" id="onboarding-status"></div>
+        <div class="onboarding-actions">
+          <button class="btn" id="onboarding-logout-btn" type="button">Sign out</button>
+          <div class="onboarding-actions-right">
+            <button class="btn" id="onboarding-back-btn" type="button">Back</button>
+            <button class="btn primary" id="onboarding-next-btn" type="submit">Save and continue</button>
+          </div>
+        </div>
+      </form>
     </div>
   </section>
 
@@ -1545,25 +1919,44 @@
         </section>
 
         <section class="view" id="student-tutor">
-          <div class="page-head">
-            <div>
-              <p class="eyebrow">Tutor Chat</p>
-              <h1>Ask a school question.</h1>
-              <p class="subtext">Student-only chat uses the AI service, child safety layer, and saved session history.</p>
+          <div class="tutor-library" id="tutor-library">
+            <div class="page-head">
+              <div>
+                <p class="eyebrow">AI Tutor</p>
+                <h1>What would you like to learn?</h1>
+                <p class="subtext">Choose a subject, then open a chapter to start a lesson-backed tutor session.</p>
+              </div>
+              <span class="pill" id="tutor-library-pill">Loading lessons</span>
             </div>
-            <div class="actions">
-              <div class="actions lesson-context-controls" aria-label="Lesson context">
-                <div class="field-group">
-                  <label for="lesson-select">Lesson</label>
-                  <select class="field" id="lesson-select" data-lesson-context>
-                    <option value="">Loading uploaded lessons...</option>
-                  </select>
+
+            <div class="subject-card-grid" id="tutor-subject-grid"></div>
+
+            <section class="chapter-browser hidden" id="tutor-chapter-browser">
+              <div class="chapter-browser-head">
+                <div>
+                  <p class="eyebrow">Choose a chapter</p>
+                  <h2 id="tutor-chapter-heading">Science lessons</h2>
+                  <p class="subtext" id="tutor-chapter-copy">Select a chapter to open your AI tutor.</p>
+                </div>
+                <button class="btn" id="back-to-subjects-btn" type="button">← All subjects</button>
+              </div>
+              <div class="chapter-card-grid" id="tutor-chapter-grid"></div>
+            </section>
+          </div>
+
+          <div class="tutor-chat-workspace hidden" id="tutor-chat-workspace">
+            <div class="page-head">
+              <div class="active-lesson-heading">
+                <button class="btn icon-only" id="back-to-lessons-btn" type="button" aria-label="Back to lessons">←</button>
+                <div>
+                  <p class="eyebrow" id="active-tutor-subject">Tutor Chat</p>
+                  <h1 id="active-tutor-lesson">Ask a school question.</h1>
+                  <p class="subtext" id="active-tutor-context">Your lesson, preferences, and quiz learning signals guide this session.</p>
                 </div>
               </div>
             </div>
-          </div>
 
-          <div class="grid student-chat-grid">
+            <div class="grid student-chat-grid">
             <section class="panel chat-panel">
               <div class="panel-header">
                 <div class="panel-title">
@@ -1593,7 +1986,7 @@
             <div class="side-stack">
               <section class="panel">
                 <div class="panel-header">
-                  <div class="panel-title">Recent chats</div>
+                  <div class="panel-title">Recent chats for this chapter</div>
                   <button class="btn icon-only" id="refresh-chat-sessions-btn" type="button" aria-label="Refresh chats">
                     <svg class="icon" viewBox="0 0 24 24"><path d="M21 12a9 9 0 0 1-9 9 9.8 9.8 0 0 1-6.7-2.7"/><path d="M3 12a9 9 0 0 1 9-9 9.8 9.8 0 0 1 6.7 2.7"/><path d="M21 3v6h-6"/><path d="M3 21v-6h6"/></svg>
                   </button>
@@ -1641,6 +2034,7 @@
                 </div>
               </section>
             </div>
+          </div>
           </div>
         </section>
 
@@ -2208,6 +2602,32 @@
       parent: { role: 'parent', name: 'Parent', initials: 'PA' },
     };
 
+    const tutorSubjects = [
+      {
+        key: 'mathematics',
+        name: 'Mathematics',
+        image: '/assets/learning/subject-mathematics.jpg',
+        description: 'Numbers, patterns, geometry, and problem solving',
+      },
+      {
+        key: 'science',
+        name: 'Science',
+        image: '/assets/learning/subject-science.jpg',
+        description: 'Living systems, matter, forces, energy, and our world',
+      },
+      {
+        key: 'social-science',
+        name: 'Social Science',
+        image: '/assets/learning/subject-social-science.jpg',
+        description: 'History, geography, civics, and society',
+      },
+    ];
+
+    const scienceChapterIcons = {
+      1: '🌾', 2: '🦠', 3: '🛢️', 4: '🔥', 5: '🐾', 6: '🐣', 7: '🌱',
+      8: '💨', 9: '⚙️', 10: '🎵', 11: '⚡', 12: '🌩️', 13: '💡',
+    };
+
     const state = {
       role: 'student',
       user: defaultUsers.student,
@@ -2220,6 +2640,8 @@
       chatSessions: [],
       availableLessons: [],
       selectedLessonKey: null,
+      selectedTutorSubject: null,
+      lessonLoadError: '',
       pendingActiveSeconds: 0,
       lastActivityTickAt: Date.now(),
       activityFlushInFlight: false,
@@ -2231,9 +2653,12 @@
       selectedStudentQuizId: null,
       activeStudentQuiz: null,
       selectedParentStudentId: null,
+      onboarding: null,
+      onboardingIndex: 0,
     };
 
     const authScreen = document.querySelector('#auth-screen');
+    const onboardingScreen = document.querySelector('#onboarding-screen');
     const appShell = document.querySelector('#app-shell');
     const nav = document.querySelector('#nav');
     const allViews = document.querySelectorAll('.view');
@@ -2367,6 +2792,9 @@
       state.selectedTeacherQuizId = null;
       state.selectedStudentQuizId = null;
       state.activeStudentQuiz = null;
+      state.selectedTutorSubject = null;
+      state.selectedLessonKey = null;
+      state.lessonLoadError = '';
       clearTimeout(state.ingestionPollTimer);
       clearTimeout(state.teacherQuizRefreshTimer);
 
@@ -2404,6 +2832,7 @@
       document.querySelector('#topbar-title').textContent = meta[0];
       document.querySelector('#topbar-subtitle').textContent = meta[1];
       if (route === 'student-tutor') {
+        showTutorLibrary();
         loadStudentLessons();
         loadChatSessions();
       }
@@ -2411,6 +2840,140 @@
       if (route === 'teacher-ingestion') loadTeacherDocuments();
       if (route === 'teacher-quizzes') loadTeacherQuizzes();
     }
+
+    function enterAuthenticatedWorkspace(role, user) {
+      state.onboarding = null;
+      onboardingScreen.classList.add('hidden');
+      authScreen.classList.add('hidden');
+      appShell.classList.remove('hidden');
+      setRole(role, user);
+    }
+
+    async function continueAfterAuthentication(role, user) {
+      state.user = user;
+      state.role = role;
+      if (role !== 'student') {
+        enterAuthenticatedWorkspace(role, user);
+        return;
+      }
+
+      const onboarding = await apiJson('/api/ai/onboarding');
+      if (!onboarding.required) {
+        enterAuthenticatedWorkspace(role, user);
+        return;
+      }
+      await openStudentOnboarding(onboarding);
+    }
+
+    async function openStudentOnboarding(onboarding) {
+      authScreen.classList.add('hidden');
+      appShell.classList.add('hidden');
+      onboardingScreen.classList.remove('hidden');
+      document.querySelector('#onboarding-question').innerHTML = '<div class="quiet-box"><strong>Preparing your questions...</strong><p>Your answers will be saved as you go.</p></div>';
+      document.querySelector('#onboarding-status').textContent = '';
+
+      state.onboarding = onboarding.status === 'not_started'
+        ? await apiJson('/api/ai/onboarding/start', { method: 'POST' })
+        : onboarding;
+      const answers = state.onboarding.answers || {};
+      const firstUnanswered = state.onboarding.questions.findIndex(question => !hasOnboardingAnswer(answers[question.id]));
+      state.onboardingIndex = firstUnanswered >= 0 ? firstUnanswered : Math.max(state.onboarding.questions.length - 1, 0);
+      renderOnboardingQuestion();
+    }
+
+    function renderOnboardingQuestion() {
+      const onboarding = state.onboarding;
+      if (!onboarding?.questions?.length) return;
+      const index = Math.min(Math.max(state.onboardingIndex, 0), onboarding.questions.length - 1);
+      state.onboardingIndex = index;
+      const question = onboarding.questions[index];
+      const answer = onboarding.answers?.[question.id];
+      const progress = Math.round((index / onboarding.questions.length) * 100);
+      document.querySelector('#onboarding-progress-bar').style.width = `${progress}%`;
+      document.querySelector('#onboarding-step').textContent = `Question ${index + 1} of ${onboarding.questions.length}`;
+      document.querySelector('#onboarding-back-btn').disabled = index === 0;
+      document.querySelector('#onboarding-next-btn').textContent = index === onboarding.questions.length - 1
+        ? 'Create my learning profile'
+        : 'Save and continue';
+
+      const helper = question.helper ? `<p class="subtext">${escapeHtml(question.helper)}</p>` : '';
+      let answerControl = '';
+      if (question.type === 'text') {
+        answerControl = `<textarea class="onboarding-answer" id="onboarding-text-answer" maxlength="300" placeholder="${escapeHtml(question.placeholder || 'Write one or two sentences.')}">${escapeHtml(answer || '')}</textarea>`;
+      } else {
+        const selected = Array.isArray(answer) ? answer : [answer];
+        const inputType = question.type === 'multiselect' ? 'checkbox' : 'radio';
+        answerControl = `<div class="onboarding-options">${question.options.map(option => `
+          <label class="onboarding-option">
+            <input type="${inputType}" name="onboarding-answer" value="${escapeHtml(option)}" ${selected.includes(option) ? 'checked' : ''}>
+            <span>${escapeHtml(option)}</span>
+          </label>
+        `).join('')}</div>`;
+      }
+      document.querySelector('#onboarding-question').innerHTML = `
+        <h2>${escapeHtml(question.prompt)}</h2>
+        ${helper}
+        ${answerControl}
+      `;
+      document.querySelector('#onboarding-status').textContent = '';
+    }
+
+    function readCurrentOnboardingAnswer() {
+      const question = state.onboarding.questions[state.onboardingIndex];
+      if (question.type === 'text') {
+        return document.querySelector('#onboarding-text-answer')?.value.trim() || '';
+      }
+      const selected = [...document.querySelectorAll('input[name="onboarding-answer"]:checked')].map(input => input.value);
+      if (question.type === 'multiselect') {
+        if (selected.length > (question.maxSelections || 3)) {
+          throw new Error(`Choose up to ${question.maxSelections || 3} options.`);
+        }
+        return selected;
+      }
+      return selected[0] || '';
+    }
+
+    function hasOnboardingAnswer(answer) {
+      return Array.isArray(answer) ? answer.length > 0 : typeof answer === 'string' && answer.trim().length > 0;
+    }
+
+    document.querySelector('#onboarding-back-btn').addEventListener('click', () => {
+      if (state.onboardingIndex <= 0) return;
+      state.onboardingIndex -= 1;
+      renderOnboardingQuestion();
+    });
+
+    document.querySelector('#onboarding-form').addEventListener('submit', async event => {
+      event.preventDefault();
+      const status = document.querySelector('#onboarding-status');
+      const nextButton = document.querySelector('#onboarding-next-btn');
+      const question = state.onboarding.questions[state.onboardingIndex];
+      try {
+        const answer = readCurrentOnboardingAnswer();
+        if (!hasOnboardingAnswer(answer)) throw new Error('Choose or write an answer before continuing.');
+        status.textContent = 'Saving your answer...';
+        nextButton.disabled = true;
+        const saved = await apiJson('/api/ai/onboarding/answers', {
+          method: 'PATCH',
+          body: { answers: { [question.id]: answer } },
+        });
+        state.onboarding = saved;
+
+        if (state.onboardingIndex === state.onboarding.questions.length - 1) {
+          status.textContent = 'Creating your learning profile...';
+          state.onboarding = await apiJson('/api/ai/onboarding/complete', { method: 'POST' });
+          enterAuthenticatedWorkspace('student', state.user);
+          return;
+        }
+
+        state.onboardingIndex += 1;
+        renderOnboardingQuestion();
+      } catch (error) {
+        status.textContent = error.message || 'Could not save this answer.';
+      } finally {
+        nextButton.disabled = false;
+      }
+    });
 
     document.querySelector('#login-form').addEventListener('submit', async event => {
       event.preventDefault();
@@ -2434,20 +2997,21 @@
         };
         state.demoMode = false;
         setConnection(true, 'Online');
-        setRole(payload.role, user);
         authStatus.textContent = '';
-        authScreen.classList.add('hidden');
-        appShell.classList.remove('hidden');
+        await continueAfterAuthentication(payload.role, user);
       } catch (error) {
         const backendReachable = Boolean(error.status && error.status < 500);
         setConnection(backendReachable, backendReachable ? 'Online' : 'Offline');
+        onboardingScreen.classList.add('hidden');
+        appShell.classList.add('hidden');
+        authScreen.classList.remove('hidden');
         authStatus.textContent = error.message || 'Could not sign in.';
       } finally {
         submitButton.disabled = false;
       }
     });
 
-    document.querySelector('#logout-btn').addEventListener('click', async () => {
+    async function logoutCurrentUser() {
       if (state.apiOnline && !state.demoMode) {
         try {
           await apiJson('/api/auth/logout', { method: 'POST' });
@@ -2462,13 +3026,19 @@
       state.selectedTeacherQuizId = null;
       state.selectedStudentQuizId = null;
       state.activeStudentQuiz = null;
+      state.onboarding = null;
+      state.onboardingIndex = 0;
       clearTimeout(state.ingestionPollTimer);
       clearTimeout(state.teacherQuizRefreshTimer);
       document.querySelector('#session-pill').innerHTML = '<span class="dot"></span>Ready';
       appShell.classList.add('hidden');
+      onboardingScreen.classList.add('hidden');
       authScreen.classList.remove('hidden');
       setRole('student', defaultUsers.student, { loadData: false });
-    });
+    }
+
+    document.querySelector('#logout-btn').addEventListener('click', logoutCurrentUser);
+    document.querySelector('#onboarding-logout-btn').addEventListener('click', logoutCurrentUser);
 
     document.addEventListener('click', event => {
       const routeButton = event.target.closest('[data-route]');
@@ -2501,8 +3071,7 @@
     }
 
     async function loadStudentLessons() {
-      const select = document.querySelector('#lesson-select');
-      if (!select || state.role !== 'student') return;
+      if (state.role !== 'student') return;
 
       if (state.demoMode) {
         renderStudentLessonOptions([
@@ -2510,6 +3079,7 @@
             key: 'demo-science-6-1',
             title: 'Science - Grade 6 - Chapter 1',
             subtitle: 'Plants and nutrition',
+            subjectKey: 'science',
             context: {
               board: 'CBSE',
               curriculum: 'NCERT',
@@ -2533,6 +3103,7 @@
       } catch (error) {
         state.availableLessons = [];
         state.selectedLessonKey = null;
+        state.lessonLoadError = error.message;
         renderStudentLessonOptions([], error.message);
         if (!error.status) setConnection(false, 'Offline');
       }
@@ -2558,6 +3129,7 @@
         title,
         subtitle: chapterName || item.filename || 'Uploaded lesson',
         chunkCount: Number(item.chunkCount || 0),
+        subjectKey: tutorSubjectKey(subject),
         context: {
           board: cleanText(metadata.board),
           curriculum: cleanText(metadata.curriculum),
@@ -2574,36 +3146,171 @@
     }
 
     function renderStudentLessonOptions(lessons, errorMessage = '') {
-      const select = document.querySelector('#lesson-select');
-      if (!select) return;
-
       state.availableLessons = lessons;
+      state.lessonLoadError = errorMessage;
       const previousSelection = state.selectedLessonKey;
-      const nextSelection = lessons.some(lesson => lesson.key === previousSelection)
+      state.selectedLessonKey = lessons.some(lesson => lesson.key === previousSelection)
         ? previousSelection
-        : lessons[0]?.key || null;
-      state.selectedLessonKey = nextSelection;
+        : null;
+      renderTutorSubjectCards();
+      if (state.selectedTutorSubject) renderTutorChapterCards(state.selectedTutorSubject);
+      if (state.selectedLessonKey) renderSelectedLessonSummary();
+    }
 
-      if (errorMessage) {
-        select.disabled = true;
-        select.innerHTML = '<option value="">Lessons unavailable</option>';
-        renderSelectedLessonSummary(errorMessage);
+    function tutorSubjectKey(subject) {
+      const value = cleanText(subject).toLowerCase().replace(/&/g, 'and');
+      if (/(math|mathematics)/.test(value)) return 'mathematics';
+      if (/(social|history|geography|civics|political)/.test(value)) return 'social-science';
+      if (/science/.test(value)) return 'science';
+      return value.replace(/[^a-z0-9]+/g, '-') || 'other';
+    }
+
+    function tutorSubjectConfig(key) {
+      return tutorSubjects.find(subject => subject.key === key) || {
+        key,
+        name: formatStatus(key),
+        image: '/assets/learning/subject-science.jpg',
+        description: 'Uploaded lesson chapters',
+      };
+    }
+
+    function renderTutorSubjectCards() {
+      const grid = document.querySelector('#tutor-subject-grid');
+      const pill = document.querySelector('#tutor-library-pill');
+      if (!grid || !pill) return;
+
+      const total = state.availableLessons.length;
+      pill.className = state.lessonLoadError ? 'pill red' : 'pill';
+      pill.textContent = state.lessonLoadError ? 'Lessons unavailable' : `${total} lesson${total === 1 ? '' : 's'} ready`;
+      grid.innerHTML = tutorSubjects.map(subject => {
+        const count = state.availableLessons.filter(lesson => lesson.subjectKey === subject.key).length;
+        return `
+          <button class="subject-card" type="button" data-tutor-subject="${escapeHtml(subject.key)}">
+            <span class="subject-card-media" style="background-image:url('${escapeHtml(subject.image)}')"></span>
+            <span class="subject-card-copy">
+              <strong>${escapeHtml(subject.name)}</strong>
+              <span>${count ? `${count} chapter${count === 1 ? '' : 's'} ready` : 'No chapters uploaded yet'}</span>
+              <span>${escapeHtml(subject.description)}</span>
+              <span class="subject-card-arrow" aria-hidden="true">→</span>
+            </span>
+          </button>
+        `;
+      }).join('');
+    }
+
+    function renderTutorChapterCards(subjectKey) {
+      const grid = document.querySelector('#tutor-chapter-grid');
+      const heading = document.querySelector('#tutor-chapter-heading');
+      const copy = document.querySelector('#tutor-chapter-copy');
+      if (!grid || !heading || !copy) return;
+      const subject = tutorSubjectConfig(subjectKey);
+      const lessons = state.availableLessons
+        .filter(lesson => lesson.subjectKey === subjectKey)
+        .sort((a, b) => (
+          Number(a.context?.grade || 0) - Number(b.context?.grade || 0)
+          || Number(a.context?.chapterNumber || 0) - Number(b.context?.chapterNumber || 0)
+          || a.subtitle.localeCompare(b.subtitle)
+        ));
+
+      heading.textContent = `${subject.name} lessons`;
+      copy.textContent = lessons.length
+        ? 'Choose a chapter to open a lesson-backed AI tutor session.'
+        : `No ${subject.name} chapters have been uploaded yet.`;
+
+      if (state.lessonLoadError) {
+        grid.innerHTML = `<div class="quiet-box"><strong>Could not load lessons.</strong><p>${escapeHtml(state.lessonLoadError)}</p></div>`;
         return;
       }
-
       if (!lessons.length) {
-        select.disabled = true;
-        select.innerHTML = '<option value="">No uploaded lessons yet</option>';
-        renderSelectedLessonSummary();
+        grid.innerHTML = `
+          <div class="quiet-box">
+            <strong>No chapters available yet.</strong>
+            <p>Ask your teacher to upload a ${escapeHtml(subject.name)} textbook chapter.</p>
+          </div>
+        `;
         return;
       }
 
-      select.disabled = false;
-      select.innerHTML = lessons.map(lesson => `
-        <option value="${escapeHtml(lesson.key)}">${escapeHtml(lesson.title)} - ${escapeHtml(lesson.subtitle)}</option>
-      `).join('');
-      select.value = state.selectedLessonKey;
+      grid.innerHTML = lessons.map(lesson => {
+        const chapterNumber = Number(lesson.context?.chapterNumber || 0);
+        const image = chapterArtwork(lesson);
+        const icon = lesson.subjectKey === 'science' ? scienceChapterIcons[chapterNumber] || '🔬' : '📘';
+        const imagePosition = lesson.subjectKey === 'science' && chapterNumber !== 1
+          ? `${20 + ((chapterNumber * 13) % 60)}% center`
+          : 'center';
+        return `
+          <button class="chapter-card" type="button" data-tutor-lesson="${escapeHtml(lesson.key)}">
+            <span class="chapter-card-media" style="background-image:url('${escapeHtml(image)}');background-position:${escapeHtml(imagePosition)}">
+              <span class="chapter-topic-icon" aria-hidden="true">${icon}</span>
+            </span>
+            <span class="chapter-card-copy">
+              <span class="chapter-number">Grade ${escapeHtml(lesson.context?.grade || '—')} · Chapter ${escapeHtml(chapterNumber || '—')}</span>
+              <strong>${escapeHtml(lesson.subtitle)}</strong>
+              <span class="chapter-card-meta"><span>${Number(lesson.chunkCount || 0)} lesson chunks</span><span>Start tutor →</span></span>
+            </span>
+          </button>
+        `;
+      }).join('');
+    }
+
+    function chapterArtwork(lesson) {
+      const chapterNumber = Number(lesson.context?.chapterNumber || 0);
+      const chapterName = cleanText(lesson.context?.chapterName).toLowerCase();
+      if (lesson.subjectKey === 'science' && (chapterNumber === 1 || /crop production/.test(chapterName))) {
+        return '/assets/learning/chapter-01-crop-production.jpg';
+      }
+      return tutorSubjectConfig(lesson.subjectKey).image;
+    }
+
+    function selectTutorSubject(subjectKey) {
+      state.selectedTutorSubject = subjectKey;
+      document.querySelector('#tutor-subject-grid')?.classList.add('hidden');
+      document.querySelector('#tutor-chapter-browser')?.classList.remove('hidden');
+      renderTutorChapterCards(subjectKey);
+    }
+
+    function showTutorLibrary(subjectKey = null) {
+      const view = document.querySelector('#student-tutor');
+      view?.classList.add('library-mode');
+      document.querySelector('#tutor-library')?.classList.remove('hidden');
+      document.querySelector('#tutor-chat-workspace')?.classList.add('hidden');
+      state.selectedTutorSubject = subjectKey;
+      const subjectGrid = document.querySelector('#tutor-subject-grid');
+      const browser = document.querySelector('#tutor-chapter-browser');
+      if (subjectKey) {
+        subjectGrid?.classList.add('hidden');
+        browser?.classList.remove('hidden');
+        renderTutorChapterCards(subjectKey);
+      } else {
+        subjectGrid?.classList.remove('hidden');
+        browser?.classList.add('hidden');
+        renderTutorSubjectCards();
+      }
+    }
+
+    function showTutorChatWorkspace() {
+      const lesson = selectedLesson();
+      if (!lesson) return;
+      const view = document.querySelector('#student-tutor');
+      view?.classList.remove('library-mode');
+      document.querySelector('#tutor-library')?.classList.add('hidden');
+      document.querySelector('#tutor-chat-workspace')?.classList.remove('hidden');
+      const context = lesson.context || {};
+      setText('#active-tutor-subject', `${context.subject || 'Lesson'} · Grade ${context.grade || '—'} · Chapter ${context.chapterNumber || '—'}`);
+      setText('#active-tutor-lesson', lesson.subtitle || 'AI Tutor');
+      setText('#active-tutor-context', 'Your textbook lesson, learning preferences, and quiz signals guide this tutor session.');
       renderSelectedLessonSummary();
+    }
+
+    function openTutorLesson(lessonKey) {
+      const lesson = state.availableLessons.find(item => item.key === lessonKey);
+      if (!lesson) return;
+      state.selectedLessonKey = lesson.key;
+      state.selectedTutorSubject = lesson.subjectKey;
+      state.chatSessions = [];
+      resetTutorSessionForLessonChange();
+      showTutorChatWorkspace();
+      loadChatSessions();
     }
 
     function selectedLesson() {
@@ -3444,14 +4151,27 @@
       const list = document.querySelector('#chat-session-list');
       if (!list || state.role !== 'student') return;
 
+      const lesson = selectedLesson();
+      if (!lesson) {
+        state.chatSessions = [];
+        renderChatSessions([]);
+        return;
+      }
+
       if (state.demoMode) {
         renderChatSessions([]);
         return;
       }
 
+      list.innerHTML = '<div class="quiet-box"><strong>Loading chapter chats...</strong></div>';
       try {
-        const payload = await apiJson('/api/ai/chat/sessions');
-        state.chatSessions = payload.sessions || [];
+        const context = lesson.context || {};
+        const params = new URLSearchParams();
+        ['subject', 'board', 'curriculum', 'grade', 'chapterNumber', 'chapterName'].forEach(key => {
+          if (context[key] != null && context[key] !== '') params.set(key, context[key]);
+        });
+        const payload = await apiJson(`/api/ai/chat/sessions?${params.toString()}`);
+        state.chatSessions = (payload.sessions || []).filter(session => chatSessionMatchesLesson(session, lesson));
         renderChatSessions(state.chatSessions);
       } catch (error) {
         state.chatSessions = [];
@@ -3465,10 +4185,11 @@
       if (!list) return;
 
       if (!sessions.length) {
+        const lesson = selectedLesson();
         list.innerHTML = `
           <div class="quiet-box">
-            <strong>No saved chats yet.</strong>
-            <p>Ask the tutor once and the conversation will appear here.</p>
+            <strong>${lesson ? 'No chats for this chapter yet.' : 'Choose a chapter to see its chats.'}</strong>
+            <p>${lesson ? 'Ask the tutor once and this chapter conversation will appear here.' : 'Your recent chats are grouped by lesson.'}</p>
           </div>
         `;
         return;
@@ -3495,12 +4216,25 @@
       }).join('');
     }
 
+    function chatSessionMatchesLesson(session, lesson = selectedLesson()) {
+      if (!lesson) return false;
+      const context = lesson.context || {};
+      const sameCoreChapter = cleanText(session.subject).toLowerCase() === cleanText(context.subject).toLowerCase()
+        && Number(session.grade || 0) === Number(context.grade || 0)
+        && Number(session.chapterNumber || 0) === Number(context.chapterNumber || 0);
+      if (!sameCoreChapter) return false;
+      const sessionName = cleanText(session.chapterName).toLowerCase();
+      const lessonName = cleanText(context.chapterName).toLowerCase();
+      return !sessionName || !lessonName || sessionName === lessonName;
+    }
+
     async function openChatSession(sessionId) {
       const session = state.chatSessions.find(item => item.sessionId === sessionId);
       if (!session) return;
 
       state.sessionId = session.sessionId;
       applyLessonFromSession(session);
+      showTutorChatWorkspace();
       document.querySelector('#session-pill').innerHTML = '<span class="dot"></span>Loading chat';
       renderChatSessions(state.chatSessions);
 
@@ -3526,8 +4260,7 @@
       });
       if (!match) return;
       state.selectedLessonKey = match.key;
-      const select = document.querySelector('#lesson-select');
-      if (select) select.value = match.key;
+      state.selectedTutorSubject = match.subjectKey;
       renderSelectedLessonSummary();
     }
 
@@ -3716,8 +4449,6 @@
     }
 
     function resetTutorSessionForLessonChange() {
-      const lessonSelect = document.querySelector('#lesson-select');
-      if (lessonSelect) state.selectedLessonKey = lessonSelect.value || null;
       state.sessionId = null;
       state.lastAssistantMessageId = null;
       renderSelectedLessonSummary();
@@ -3834,6 +4565,21 @@
     }
 
     document.querySelector('#new-chat-btn').addEventListener('click', startNewTutorChat);
+    document.querySelector('#tutor-subject-grid').addEventListener('click', event => {
+      const card = event.target.closest('[data-tutor-subject]');
+      if (!card) return;
+      selectTutorSubject(card.dataset.tutorSubject);
+    });
+    document.querySelector('#tutor-chapter-grid').addEventListener('click', event => {
+      const card = event.target.closest('[data-tutor-lesson]');
+      if (!card) return;
+      openTutorLesson(card.dataset.tutorLesson);
+    });
+    document.querySelector('#back-to-subjects-btn').addEventListener('click', () => showTutorLibrary());
+    document.querySelector('#back-to-lessons-btn').addEventListener('click', () => {
+      const lesson = selectedLesson();
+      showTutorLibrary(lesson?.subjectKey || state.selectedTutorSubject || null);
+    });
     document.querySelector('#refresh-chat-sessions-btn').addEventListener('click', loadChatSessions);
     document.querySelector('#chat-session-list').addEventListener('click', event => {
       const button = event.target.closest('[data-chat-session]');
@@ -3868,10 +4614,6 @@
       } finally {
         sendButton.disabled = false;
       }
-    });
-
-    document.querySelectorAll('[data-lesson-context]').forEach(control => {
-      control.addEventListener('change', resetTutorSessionForLessonChange);
     });
 
     document.querySelector('#rating-buttons').addEventListener('click', event => {
@@ -4478,10 +5220,8 @@
         };
         state.demoMode = false;
         setConnection(true, 'Online');
-        setRole(payload.role, user);
         authStatus.textContent = '';
-        authScreen.classList.add('hidden');
-        appShell.classList.remove('hidden');
+        await continueAfterAuthentication(payload.role, user);
       } catch (error) {
         if (error.status === 401) {
           setConnection(true, 'Online');
@@ -4489,6 +5229,9 @@
           return;
         }
         setConnection(false, 'Offline');
+        onboardingScreen.classList.add('hidden');
+        appShell.classList.add('hidden');
+        authScreen.classList.remove('hidden');
         authStatus.textContent = 'Backend is not reachable yet. Start services and sign in again.';
       }
     }
