@@ -35,6 +35,10 @@ const {
   formatQuizLearningContextForPrompt,
   buildQuizLearningContextUrl,
 } = require('./quiz-learning-context');
+const {
+  refreshStudentNews,
+  balanceNewsCategories,
+} = require('./student-news');
 
 const app = express();
 const prisma = new PrismaClient();
@@ -71,6 +75,9 @@ const IMAGE_PROMPT_MAX_LENGTH = 300;
 const IMAGE_JOB_TIMEOUT_MS = Number(process.env.IMAGE_JOB_TIMEOUT_MS || 5 * 60 * 1000);
 const IMAGE_POLL_INTERVAL_MS = Number(process.env.IMAGE_POLL_INTERVAL_MS || 3000);
 const IMAGE_TIMEOUT_CLEANUP_MS = Number(process.env.IMAGE_TIMEOUT_CLEANUP_MS || 2 * 60 * 1000);
+const NEWS_REFRESH_ENABLED = String(process.env.NEWS_REFRESH_ENABLED || 'true').toLowerCase() === 'true';
+const NEWS_REFRESH_INTERVAL_MS = Math.max(Number(process.env.NEWS_REFRESH_INTERVAL_MS || 3 * 60 * 60 * 1000), 15 * 60 * 1000);
+let newsRefreshPromise = null;
 
 app.disable('x-powered-by');
 app.use(express.json({ limit: '1mb' }));
@@ -83,6 +90,45 @@ app.get('/health', (_req, res) => {
 });
 
 const studentOnly = [requireAuth, requireAuth.requireRole('student')];
+
+app.get('/api/ai/news', ...studentOnly, asyncHandler(async (req, res) => {
+  const category = normalizeOptionalText(req.query?.category, 60);
+  if (category === false) return res.status(400).json({ error: 'category must be a string up to 60 characters.' });
+  const limit = normalizeOptionalInteger(req.query?.limit, 1, 30);
+  if (limit === false) return res.status(400).json({ error: 'limit must be an integer from 1 to 30.' });
+
+  const now = new Date();
+  const where = {
+    safetyStatus: 'approved',
+    expiresAt: { gt: now },
+  };
+  if (category) where.category = { equals: category, mode: 'insensitive' };
+
+  let availableArticles = await prisma.studentNewsArticle.findMany({
+    where,
+    orderBy: { publishedAt: 'desc' },
+    take: 100,
+  });
+  if (!availableArticles.length && NEWS_REFRESH_ENABLED) {
+    await triggerStudentNewsRefresh();
+    availableArticles = await prisma.studentNewsArticle.findMany({
+      where,
+      orderBy: { publishedAt: 'desc' },
+      take: 100,
+    });
+  }
+  const articles = category
+    ? availableArticles.slice(0, limit || 15)
+    : balanceNewsCategories(availableArticles, limit || 15);
+
+  res.status(200).json({
+    articles: articles.map(toPublicStudentNewsArticle),
+    refreshedAt: articles.reduce(
+      (latest, article) => article.updatedAt > latest ? article.updatedAt : latest,
+      new Date(0)
+    ),
+  });
+}));
 
 app.get('/api/ai/onboarding', ...studentOnly, asyncHandler(async (req, res) => {
   const onboarding = await prisma.studentOnboarding.findUnique({
@@ -802,9 +848,25 @@ const imageTimeoutTimer = setInterval(() => {
 }, IMAGE_TIMEOUT_CLEANUP_MS);
 imageTimeoutTimer.unref?.();
 
+const newsRefreshTimer = setInterval(() => {
+  triggerStudentNewsRefresh().catch(err => {
+    console.warn('[ai] student news refresh failed:', err.message);
+  });
+}, NEWS_REFRESH_INTERVAL_MS);
+newsRefreshTimer.unref?.();
+
+if (NEWS_REFRESH_ENABLED) {
+  setTimeout(() => {
+    triggerStudentNewsRefresh().catch(err => {
+      console.warn('[ai] initial student news refresh failed:', err.message);
+    });
+  }, 2500).unref?.();
+}
+
 async function shutdown(signal) {
   console.log(`[ai] ${signal} received. Shutting down...`);
   clearInterval(imageTimeoutTimer);
+  clearInterval(newsRefreshTimer);
   server.close(async () => {
     await prisma.$disconnect();
     process.exit(0);
@@ -816,6 +878,35 @@ process.on('SIGTERM', () => shutdown('SIGTERM'));
 
 function asyncHandler(handler) {
   return (req, res, next) => Promise.resolve(handler(req, res, next)).catch(next);
+}
+
+async function triggerStudentNewsRefresh() {
+  if (!NEWS_REFRESH_ENABLED) return { fetched: 0, approved: 0, errors: [] };
+  if (!newsRefreshPromise) {
+    newsRefreshPromise = refreshStudentNews({ prisma })
+      .then(result => {
+        if (result.errors.length) console.warn('[ai] some student news feeds were unavailable:', result.errors.join('; '));
+        console.log(`[ai] student news refreshed: ${result.approved}/${result.fetched} articles approved`);
+        return result;
+      })
+      .finally(() => {
+        newsRefreshPromise = null;
+      });
+  }
+  return newsRefreshPromise;
+}
+
+function toPublicStudentNewsArticle(article) {
+  return {
+    id: article.id,
+    category: article.category,
+    title: article.title,
+    summary: article.summary,
+    url: article.url,
+    imageUrl: article.imageUrl,
+    sourceName: article.sourceName,
+    publishedAt: article.publishedAt,
+  };
 }
 
 function normalizeProvider(provider, allowedProviders, fallbackProvider) {
