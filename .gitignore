@@ -1,5 +1,7 @@
 .env
 .env.production
+*.crlf.bak
+.DS_Store
 backups/
 .env.gemini-template
 node_modules/
