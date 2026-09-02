@@ -1,5 +1,7 @@
 # Analytics / Learning Progress Service LLD
 
+> **Historical LLD — verify routes, event types, and response shapes against current code before use.**
+
 Service path: `services/analytics`
 
 ## Purpose

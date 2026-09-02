@@ -6,3 +6,7 @@ node_modules/
 __pycache__/
 *.pyc
 .pytest_cache/
+
+# Local dev SQLite databases. `services/lms` writes dev.db on first run; it is
+# seeded state, not source, and committing it produces binary merge conflicts.
+*.db

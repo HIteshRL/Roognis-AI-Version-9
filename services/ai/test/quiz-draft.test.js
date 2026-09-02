@@ -6,6 +6,7 @@ const {
   evenlySample,
   normalizeQuizDraftRequest,
   generateQuizDraft,
+  resolveQuizProvider,
   assertOpenRouterOpenAiModel,
   extractResponseText,
   repairQuizDraftCitations,
@@ -283,6 +284,117 @@ test('regenerates the whole quiz after the quality gate rejects navigation trivi
   assert.equal(result.qualityAttempts, 2);
   assert.match(capturedMessages[1][2].content, /previous draft was rejected/i);
   assert.match(capturedMessages[1][2].content, /document navigation/i);
+});
+
+test('prefers OpenRouter over Groq when both keys are present', () => {
+  const provider = resolveQuizProvider({ openrouterApiKey: 'or-key', groqApiKey: 'groq-key', model: 'openai/gpt-5-mini' });
+  assert.equal(provider.name, 'openrouter');
+  assert.equal(provider.model, 'openai/gpt-5-mini');
+});
+
+test('falls back to Groq when no OpenRouter key is configured', () => {
+  const provider = resolveQuizProvider({ groqApiKey: 'groq-key' });
+  assert.equal(provider.name, 'groq');
+  assert.equal(provider.baseUrl, 'https://api.groq.com/openai/v1');
+  assert.equal(provider.strictSchema, false);
+});
+
+test('throws a clear error when neither provider key is configured', () => {
+  assert.throws(() => resolveQuizProvider({}), /OPENROUTER_API_KEY or GROQ_API_KEY/);
+});
+
+test('generates a quiz draft over the Groq fallback with json_object mode', async () => {
+  const draft = JSON.stringify(sampleDraft());
+  let capturedUrl = '';
+  let capturedBody = null;
+
+  const result = await generateQuizDraft({
+    payload: sampleRequest(),
+    config: {
+      groqApiKey: 'test-groq-key',
+      model: 'llama-3.3-70b-versatile',
+      timeoutMs: 1000,
+      qualityReview: false,
+    },
+    fetchFn: async (url, options) => {
+      capturedUrl = url;
+      capturedBody = JSON.parse(options.body);
+      return {
+        ok: true,
+        json: async () => ({
+          model: 'llama-3.3-70b-versatile',
+          choices: [{ message: { content: draft } }],
+          usage: { total_tokens: 88 },
+        }),
+      };
+    },
+  });
+
+  assert.equal(capturedUrl, 'https://api.groq.com/openai/v1/chat/completions');
+  assert.equal(capturedBody.model, 'llama-3.3-70b-versatile');
+  assert.equal(capturedBody.response_format.type, 'json_object');
+  assert.equal(Object.prototype.hasOwnProperty.call(capturedBody, 'reasoning'), false);
+  assert.equal(Object.prototype.hasOwnProperty.call(capturedBody, 'provider'), false);
+  assert.match(capturedBody.messages[0].content, /JSON Schema/);
+  assert.equal(result.provider, 'groq');
+  assert.equal(result.model, 'llama-3.3-70b-versatile');
+  assert.equal(result.usage.total_tokens, 88);
+});
+
+test('parses fenced JSON from a Groq response that ignores the no-markdown instruction', async () => {
+  const draft = sampleDraft();
+  const fenced = '```json\n' + JSON.stringify(draft) + '\n```';
+
+  const result = await generateQuizDraft({
+    payload: sampleRequest(),
+    config: {
+      groqApiKey: 'test-groq-key',
+      timeoutMs: 1000,
+      qualityReview: false,
+    },
+    fetchFn: async () => ({
+      ok: true,
+      json: async () => ({
+        model: 'llama-3.3-70b-versatile',
+        choices: [{ message: { content: fenced } }],
+      }),
+    }),
+  });
+
+  assert.equal(result.draft.title, draft.title);
+});
+
+test('caps Groq to a smaller chunk sample and a single quality pass by default', () => {
+  const provider = resolveQuizProvider({ groqApiKey: 'groq-key' });
+  assert.ok(provider.chunkLimit < 40);
+  assert.equal(provider.defaultQualityReview, false);
+  assert.equal(provider.defaultQualityAttempts, 1);
+});
+
+test('does not run a second Groq quality-review pass unless explicitly requested', async () => {
+  let calls = 0;
+  await generateQuizDraft({
+    payload: sampleRequest(),
+    config: { groqApiKey: 'test-groq-key', timeoutMs: 1000 },
+    fetchFn: async () => {
+      calls += 1;
+      return {
+        ok: true,
+        json: async () => ({
+          model: 'llama-3.3-70b-versatile',
+          choices: [{ message: { content: JSON.stringify(sampleDraft()) } }],
+        }),
+      };
+    },
+  });
+  assert.equal(calls, 1);
+});
+
+test('throws immediately when no quiz provider key is configured at all', async () => {
+  await assert.rejects(
+    generateQuizDraft({ payload: sampleRequest(), config: {} }),
+    /OPENROUTER_API_KEY or GROQ_API_KEY/
+  );
 });
 
 test('runs a final assessment-editor pass for semantically stronger questions', async () => {

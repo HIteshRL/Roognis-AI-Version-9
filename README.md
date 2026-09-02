@@ -56,7 +56,7 @@ On login, the browser is redirected to the appropriate dashboard based on the us
 
 ## What Is Built (Auth + Infrastructure)
 
-The following is complete and production-ready:
+The following is implemented in the current codebase; verify deployment-specific readiness before production use:
 
 ### Auth Service (`services/auth/`) — `:3001`
 
@@ -123,7 +123,7 @@ parent_student  — parent_id, student_id  (composite PK, idempotent linking)
 For an HTTPS, secrets-hardened Oracle Cloud deployment, use the production
 override and follow [docs/ORACLE_DEPLOYMENT.md](docs/ORACLE_DEPLOYMENT.md).
 
-**`traefik/traefik.yml`** — API gateway config. Routes requests by path prefix to the correct service. CORS configured for `localhost:3000`. Dashboard available at `http://localhost:8080`.
+**`traefik/traefik.yml`** — API gateway config. Routes requests by path prefix to the correct service. The Traefik dashboard is disabled by default.
 
 **`scripts/ollama-init.sh`** — Optional local fallback entrypoint for Ollama. Starts the server, waits for the API, pulls `qwen2.5` and `nomic-embed-text` (idempotent — skips if already in the volume), then keeps the container alive.
 
@@ -191,7 +191,7 @@ LLM_PROVIDER=ollama IMAGE_PROVIDER=comfyui docker-compose --profile local-ai up 
 
 | Service | URL | Description |
 |---|---|---|
-| Frontend | http://localhost:3000 | Main application |
+| Frontend | http://localhost/ | Main application through the gateway |
 | API Gateway | http://localhost:80 | All API requests |
 | Traefik Dashboard | http://localhost:8080 | Live routing view |
 | ComfyUI | http://localhost:8188 | Optional local image generation UI |
@@ -243,7 +243,7 @@ LLM_PROVIDER=ollama IMAGE_PROVIDER=comfyui docker-compose --profile local-ai up 
 
 ### Frontend teacher flow
 
-1. Open `http://localhost:3000`.
+1. Open `http://localhost/`.
 2. Log in as `teacher@demo.com` with password `demo1234`.
 3. In the teacher sidebar, open `Ingestion`.
 4. Select a PDF and fill the required metadata fields: board, curriculum, grade, subject, book, chapter, chapter name, language, and edition.
@@ -287,8 +287,11 @@ curl -s -b /tmp/roognis-teacher-cookies.txt http://localhost/api/rag/upload/DOC_
 # List uploaded documents for the teacher's school
 curl -s -b /tmp/roognis-teacher-cookies.txt "http://localhost/api/rag/documents?subject=Science&grade=8&status=ready"
 
-# Retrieve AI-compatible chunks; this endpoint intentionally does not require JWT
-curl -s "http://localhost/api/rag/retrieve?q=dentist%20mirror&schoolId=550e8400-e29b-41d4-a716-446655440000&subject=Science&grade=8&chapterNumber=10&top=5"
+# Retrieve AI-compatible chunks. Service-to-service only: it takes the shared
+# internal token, not a user JWT, because `schoolId` is a caller-supplied
+# parameter and is the only tenancy filter.
+curl -s -H "X-Internal-Service-Token: $INTERNAL_SERVICE_TOKEN" \
+  "http://localhost/api/rag/internal/retrieve?q=dentist%20mirror&schoolId=550e8400-e29b-41d4-a716-446655440000&subject=Science&grade=8&chapterNumber=10&top=5"
 ```
 
 Expected retrieval shape:
@@ -398,156 +401,11 @@ Manual checks:
 
 ---
 
-## Team Handoff Guide
-
-This section is for team members implementing the remaining services.
-
-### Environment Variables Available to Your Service
-
-Every service receives these variables from `docker-compose.yml`. You do not need to set them manually:
-
-```sh
-# Your service's database schema
-DATABASE_URL=postgresql://postgres:<DB_PASSWORD>@postgres:5432/roognis?schema=<your_schema>
-
-# Shared JWT secret — use this to verify tokens
-JWT_SECRET=<from .env>
-
-# Internal service URLs
-LLM_PROVIDER=gemini
-IMAGE_PROVIDER=gemini
-GEMINI_API_KEY=<from .env>
-GEMINI_TEXT_MODEL=<from .env>
-GEMINI_IMAGE_MODEL=<from .env>
-OLLAMA_URL=http://ollama:11434        # optional fallback
-RAG_SERVICE_URL=http://rag:3003
-QUIZ_SERVICE_URL=http://quiz:3005
-ANALYTICS_URL=http://analytics:3004
-AI_SERVICE_URL=http://ai:3002
-COMFYUI_URL=http://comfyui:8188       # optional fallback
-
-# File storage
-FILE_STORAGE_PATH=/app/storage
-```
-
-### Adding JWT Auth to Your Service
-
-Copy `services/auth/middleware/auth.js` into your service's `middleware/` folder. No changes needed.
-
-```sh
-# From your service directory
-cp ../auth/middleware/auth.js middleware/auth.js
-```
-
-Then use it in your routes:
-
-```js
-const requireAuth = require('./middleware/auth');
-
-router.get('/api/ai/chat/:id/history', requireAuth, requireAuth.requireRole('student'), handler);
-```
-
-### AI Service — What to Build
-
-**File:** `services/ai/server.js` (replace the stub)  
-**Schema:** `ai_db` — chat_sessions, messages, image_jobs, feedback  
-**Key dependencies:** `express`, `@prisma/client`, `node-cron`, `cookie-parser`, `jsonwebtoken`
-
-See `roognis-ai-design-complete.pdf → LLD v3 → AI Service :3002` for full endpoint specs and system prompt. The current MVP defaults to Gemini for text and image generation while keeping Ollama/ComfyUI fallback support.
-
-The AI Service owns MVP child safety: it blocks unsafe chat/image prompts before provider calls, validates generated chat output before SSE streaming, returns a safe refusal for blocked content, and emits non-blocking safety analytics events.
-
-### RAG / EKE Service — Current Surface
-
-**Files:** `services/rag/main.py`, `services/rag/eke_pipeline.py`, `services/rag/chunking.py`, `services/rag/retrieval.py`
-
-**Schema:** `rag_db` — SQLAlchemy-managed documents, ingestion jobs, educational entities, relationships, and retrieval chunks
-
-**Key dependencies:** `fastapi`, `uvicorn`, `pymupdf`, `chromadb`, `ollama`, `pyjwt`, `sqlalchemy`
-
-Implemented endpoints:
-
-| Method | Path | Auth | Description |
-|---|---|---|---|
-| `POST` | `/api/rag/upload` | Teacher JWT | Upload a PDF and run EKE ingestion |
-| `GET` | `/api/rag/upload/:docId/status` | Teacher JWT | Poll document/job lifecycle status |
-| `GET` | `/api/rag/documents` | Teacher JWT | List school-scoped uploaded documents |
-| `GET` | `/api/rag/retrieve` | None | Return AI-compatible `{ chunks }` with `text`, `source`, and `score` |
-| `GET` | `/api/rag/internal/chapters` | Internal token | List ready chapter groups for Quiz Service |
-| `GET` | `/api/rag/internal/chapter-context` | Internal token | Return ordered chunks/entities for one ready chapter |
-
-The retrieve endpoint is called internally by the AI Service without JWT. Document management remains teacher-only and school-scoped. Quiz orchestration uses internal-token RAG context endpoints.
-
-### Quiz Service — Current Surface
-
-**Files:** `services/quiz/server.js`, `services/quiz/lib/generation.js`, `services/quiz/lib/student-learning.js`, `services/quiz/prisma/schema.prisma`
-
-**Schema:** `quiz_db` — chapter sources, generation jobs, quizzes, questions, and student attempts
-
-Implemented endpoints:
-
-| Method | Path | Auth | Description |
-|---|---|---|---|
-| `POST` | `/api/quiz/internal/chapter-ready` | Internal token | Upsert ready chapter source and queue generation |
-| `GET` | `/api/quiz/internal/student-learning-context` | Internal token | Return active-quiz weak areas scoped to one student and lesson |
-| `POST` | `/api/quiz/backfill` | Teacher JWT | Discover ready RAG chapters and queue missing quizzes |
-| `GET` | `/api/quiz/chapters` | Teacher JWT | List chapter quiz generation status |
-| `POST` | `/api/quiz/sources/:sourceId/generate` | Teacher JWT | Retry/generate one chapter quiz |
-| `GET` | `/api/quiz/:quizId` | Teacher JWT | Review quiz with answers and explanations |
-| `GET` | `/api/quiz/student/chapters` | Student JWT | List ready quizzes without answers |
-| `GET` | `/api/quiz/student/quizzes/:quizId` | Student JWT | Open a ready quiz without answers |
-| `POST` | `/api/quiz/student/quizzes/:quizId/submit` | Student JWT | Grade and persist an attempt with weak-area signals |
-
-For each tutor message, the AI Service requests the current student's active-quiz signals using the selected subject, grade, and chapter. Gemini receives a bounded academic-personalization section alongside the one-time onboarding learning preferences. Archived quiz attempts are excluded, repeated labels are deduplicated per attempt, instruction-like labels are dropped, and tutor chat continues without quiz context if the Quiz Service is unavailable.
-
-Detailed contract: `docs/backend-services/RAG_EKE_INGESTION_CONTRACT.md`.
-
-### Analytics Service — What to Build
-
-**File:** `services/analytics/server.js` (replace the stub)  
-**Schema:** `analytics_db` — events, attendance, scores, class_assignments  
-**Key dependencies:** `express`, `@prisma/client`, `cookie-parser`, `jsonwebtoken`
-
-The `/api/analytics/event` endpoint accepts fire-and-forget events from other services without JWT. The stub already accepts these so the AI Service does not crash before Analytics is implemented.
-
-The intervention rule flags a student if: `AVG(feedback rating) < 3.0` OR `COUNT(DISTINCT session_id) < 3` in the last 7 days — calculated at query time, no cron needed.
-
-### Frontend — Current Surface
-
-**File:** `frontend/index.html` served by `frontend/server.js`
-
-**API base URL:** `http://localhost/api` (configured via `NEXT_PUBLIC_API_URL` in compose)
-
-All requests should be made with `credentials: 'include'` so the browser sends the HttpOnly JWT cookie:
-
-```js
-fetch('http://localhost/api/auth/me', { credentials: 'include' })
-```
-
-After login, the single-page frontend switches workspace based on `role`:
-- `student` → tutor chat, diagrams, videos, and feedback
-- `teacher` → EKE ingestion workspace and document library
-- `parent` → linked-child placeholder pending Analytics/Quiz data
-
-### Rebuilding a Single Service
-
-You do not need to restart the entire stack when working on one service:
-
-```sh
-docker-compose up --build ai       # Rebuild and restart only the AI service
-docker-compose logs -f analytics   # Follow logs for a specific service
-docker-compose ps                  # Check status of all services
-```
-
----
-
 ## API Reference
 
 All requests go through Traefik at `http://localhost:80`. The JWT cookie is set automatically on login and sent with every subsequent request.
 
 ### Authentication
-
-> **Note:** Use single-line curl commands (no backslash line breaks) in zsh/macOS Terminal.
 
 ```sh
 # Register a student
@@ -588,7 +446,7 @@ curl -s -b /tmp/cookies.txt -X POST http://localhost/api/auth/logout
 
 ## Cloud Deployment — Kubernetes
 
-The entire stack is designed for zero-code cloud migration. Every infrastructure dependency is driven by a single environment variable.
+Cloud deployment requires environment-specific configuration and may require code or manifest changes when infrastructure providers change.
 
 ### Cloud Swap Table
 
@@ -599,8 +457,6 @@ The entire stack is designed for zero-code cloud migration. Every infrastructure
 | LLM | Gemini API | Ollama fallback or other hosted API | Set `LLM_PROVIDER` + provider key |
 | File Storage | Docker volume | AWS S3 | Set `AWS_S3_BUCKET` + credentials |
 | Routing | Traefik (Docker labels) | nginx-ingress | `kubernetes/ingress/ingress.yaml` |
-
-No code changes required — only Kubernetes Secret values differ per environment.
 
 ### Deploy to Kubernetes
 
@@ -639,7 +495,7 @@ kubectl get hpa -n roognis
 ```
 roognis/
 ├── .env.example                    — Environment variable template
-├── docker-compose.yml              — Full local stack (10 services)
+├── docker-compose.yml              — Full local stack
 ├── traefik/
 │   └── traefik.yml                 — API gateway config + CORS
 ├── scripts/
@@ -700,5 +556,3 @@ Single-node simplicity during development — one container, one volume, one bac
 **Why Traefik instead of nginx?**  
 Traefik reads Docker labels directly and reconfigures routing dynamically when containers start or stop. The entire routing table is co-located with each service in `docker-compose.yml`, making it easy for each team member to own their own routing rules without touching a shared config file.
 
-**Why `prisma db push` instead of migrations?**  
-During early development, `db push` is schema-forward — it applies the current schema without requiring a migration history. When the schema stabilises pre-launch, switch to `prisma migrate deploy` with committed migration files for reproducible, auditable schema changes.

@@ -1,0 +1,1 @@
+import{a as t}from"./common-CuqoirWz.js";import{b as a}from"./index-Cn8aTGP-.js";function u(e){return a(["facts","class",e==null?void 0:e.id],()=>{if(!e)throw new Error("No classroom selected");return t(e)},{enabled:!!e,staleTime:12e4})}export{u};

@@ -1,0 +1,75 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: discover
+  namespace: roognis
+  labels:
+    app: discover
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: discover
+  template:
+    metadata:
+      labels:
+        app: discover
+    spec:
+      initContainers:
+        # Runs schema migration before the app starts, so only one pod applies
+        # it even with replicas > 1.
+        - name: db-migrate
+          image: roognis/discover:latest
+          command: ["npx", "prisma", "migrate", "deploy", "--schema=prisma/schema.prisma"]
+          envFrom:
+            - secretRef:
+                name: discover-secrets
+      containers:
+        - name: discover
+          image: roognis/discover:latest
+          command: ["node", "server.js"]
+          ports:
+            - containerPort: 3008
+          envFrom:
+            - secretRef:
+                name: discover-secrets
+          env:
+            - name: PORT
+              value: "3008"
+            - name: NODE_ENV
+              value: production
+            # In-cluster service discovery. Discover calls ai once per student
+            # for the legacy interest-graph + onboarding cold-start import, and
+            # emits events to analytics.
+            - name: AI_SERVICE_URL
+              value: "http://ai:3002"
+            - name: ANALYTICS_URL
+              value: "http://analytics:3004"
+            # Both timers fire on every replica; that is safe because the timer
+            # only enqueues a HuntRun row and workers claim it with an
+            # updateMany(status:'queued') lease. See services/discover/hunt/run.js.
+            - name: DISCOVER_HUNT_ENABLED
+              value: "true"
+            - name: DISCOVER_HUNT_INTERVAL_MS
+              value: "10800000"
+            - name: DISCOVER_HUNT_MAX_TOPICS_PER_RUN
+              value: "12"
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 3008
+            initialDelaySeconds: 15
+            periodSeconds: 20
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 3008
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          resources:
+            requests:
+              cpu: "100m"
+              memory: "128Mi"
+            limits:
+              cpu: "500m"
+              memory: "512Mi"

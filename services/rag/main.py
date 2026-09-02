@@ -5,7 +5,8 @@
 # Responsibilities:
 #   - POST /api/rag/upload              → upload PDF + embed into ChromaDB
 #   - GET  /api/rag/upload/:docId/status
-#   - GET  /api/rag/retrieve            → top-5 chunks for AI service (no JWT)
+#   - GET  /api/rag/internal/retrieve   → top-5 chunks for AI service
+#                                         (service token, not a user JWT)
 #   - GET  /api/rag/documents           → list uploaded docs for this school
 #
 # Tech stack: FastAPI + LangChain + PyMuPDF + chromadb SDK + PyJWT + SQLAlchemy
@@ -26,6 +27,7 @@ from urllib import request as urlrequest
 from urllib.error import URLError
 
 from fastapi import Depends, FastAPI, File, Form, HTTPException, Query, UploadFile, status
+from fastapi.responses import FileResponse
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
@@ -33,7 +35,7 @@ from auth import AuthUser, get_current_user, require_internal_token, require_tea
 from chunking import generate_chunks_and_embeddings
 from config import Settings, get_settings
 from database import get_db, init_db
-from eke_pipeline import run_entity_extraction
+from eke_pipeline import TEXTBOOK_SOURCE_TYPE, run_entity_extraction
 from models import (
     Document,
     DocumentIngestionJob,
@@ -62,7 +64,7 @@ def health():
     return {"status": "ok", "service": "rag"}
 
 
-@app.get("/api/rag/retrieve")
+@app.get("/api/rag/internal/retrieve")
 def retrieve(
     q: str = "",
     schoolId: str = "",
@@ -74,7 +76,21 @@ def retrieve(
     top: Annotated[int, Query(ge=1, le=20)] = 5,
     db: Session = Depends(get_db),
     settings: Settings = Depends(get_settings),
+    _internal: None = Depends(require_internal_token),
 ):
+    """Top chunks for the AI service.
+
+    This is a service-to-service call and always was — the AI service derives
+    `schoolId` from the caller's JWT and passes it here. It previously carried
+    no authentication of any kind while every sibling route did, and `schoolId`
+    is the only tenancy filter, so anyone who knew (or guessed) a school id
+    could read that school's entire ingested textbook corpus unauthenticated.
+
+    Now it sits under `/internal/` behind the shared service token, matching
+    `internal/chapters` and `internal/chapter-context`. The path moved so the
+    security posture is legible from the URL rather than having to be
+    remembered.
+    """
     chunks = retrieve_chunks(
         db,
         RetrievalFilters(
@@ -230,6 +246,37 @@ def list_documents(
     return {
         "documents": [document_summary(db, document) for document in documents]
     }
+
+
+@app.get("/api/rag/documents/{doc_id}/file")
+def get_document_file(
+    doc_id: str,
+    user: AuthUser = Depends(get_current_user),
+    db: Session = Depends(get_db),
+    settings: Settings = Depends(get_settings),
+):
+    """Serves the original uploaded PDF back — presentation only, no
+    learner-state write, so any authenticated role may read it (same access
+    pattern as `list_documents` above). Restricted to `ready` documents so a
+    student can never fetch a file mid-ingestion or one that failed."""
+    document = get_school_document(db, doc_id, user.school_id)
+    if document.status != DocumentStatus.READY.value or not document.file_path:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Document not found.")
+
+    storage_root = Path(settings.file_storage_path).resolve()
+    file_path = Path(document.file_path).resolve()
+    if storage_root != file_path and storage_root not in file_path.parents:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Document not found.")
+    if not file_path.is_file():
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Document not found.")
+
+    download_name = safe_filename(f"{document.chapter_name or document.filename or 'chapter'}.pdf")
+    return FileResponse(
+        path=file_path,
+        media_type="application/pdf",
+        filename=download_name,
+        content_disposition_type="inline",
+    )
 
 
 @app.get("/api/rag/internal/chapters")
@@ -558,7 +605,7 @@ def sibling_ready_chapter_documents(db: Session, document: Document) -> list[Doc
 def validate_pdf_upload(file: UploadFile) -> None:
     filename = file.filename or ""
     content_type = file.content_type or ""
-    if not filename.lower().endswith(".pdf") and content_type != "application/pdf":
+    if not filename.lower().endswith(".pdf") or content_type != "application/pdf":
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Only PDF uploads are supported.",
@@ -599,8 +646,7 @@ def normalize_upload_metadata(
     }
     if difficulty and difficulty.strip():
         values["difficulty"] = difficulty.strip()
-    if values["curriculum"] == "NCERT":
-        values["sourceType"] = "ncert_textbook"
+    values["sourceType"] = TEXTBOOK_SOURCE_TYPE
     parsed_tags = parse_tags(tags)
     if parsed_tags:
         values["tags"] = parsed_tags

@@ -9,6 +9,8 @@ volumes:
   ollama_models:
   comfy_models:
   file_storage:
+  neo4j_data:
+  neo4j_logs:
 
 services:
 
@@ -43,6 +45,24 @@ services:
     image: chromadb/chroma:latest
     volumes:
       - chroma_data:/chroma/chroma
+    restart: unless-stopped
+
+  neo4j:
+    image: neo4j:5.26-community
+    environment:
+      NEO4J_AUTH: "neo4j/${NEO4J_PASSWORD:-roognis-graph-change-me}"
+      NEO4J_PASSWORD: ${NEO4J_PASSWORD:-roognis-graph-change-me}
+      NEO4J_server_memory_heap_initial__size: ${NEO4J_HEAP_INITIAL:-256m}
+      NEO4J_server_memory_heap_max__size: ${NEO4J_HEAP_MAX:-512m}
+    volumes:
+      - neo4j_data:/data
+      - neo4j_logs:/logs
+    healthcheck:
+      test: ["CMD-SHELL", "cypher-shell -u neo4j -p '$$NEO4J_PASSWORD' 'RETURN 1' >/dev/null 2>&1 || exit 1"]
+      interval: 10s
+      timeout: 8s
+      retries: 15
+      start_period: 30s
     restart: unless-stopped
 
   # ── AI Layer ─────────────────────────────────────────────────────────────────
@@ -81,7 +101,7 @@ services:
              node scripts/seed.js &&
              node server.js"
     environment:
-      DATABASE_URL: "postgresql://postgres:${DB_PASSWORD}@postgres:5432/roognis?schema=auth_db"
+      DATABASE_URL: "postgresql://postgres:${DB_PASSWORD}@postgres:5432/roognis?schema=auth_db&connection_limit=10&pool_timeout=10"
       JWT_SECRET: ${JWT_SECRET}
       DEMO_SCHOOL_ID: ${DEMO_SCHOOL_ID:-}
       SEED_DEMO_USERS: ${SEED_DEMO_USERS:-true}
@@ -118,13 +138,18 @@ services:
              npx prisma db push --schema=prisma/schema.prisma ||
              true && node server.js"
     environment:
-      DATABASE_URL: "postgresql://postgres:${DB_PASSWORD}@postgres:5432/roognis?schema=ai_db"
+      DATABASE_URL: "postgresql://postgres:${DB_PASSWORD}@postgres:5432/roognis?schema=ai_db&connection_limit=10&pool_timeout=10"
       JWT_SECRET: ${JWT_SECRET}
       LLM_PROVIDER: ${LLM_PROVIDER:-gemini}
       IMAGE_PROVIDER: ${IMAGE_PROVIDER:-gemini}
       GEMINI_API_KEY: ${GEMINI_API_KEY:-}
       GEMINI_TEXT_MODEL: ${GEMINI_TEXT_MODEL:-gemini-3.1-flash-lite}
       GEMINI_IMAGE_MODEL: ${GEMINI_IMAGE_MODEL:-gemini-3.1-flash-image}
+      GROQ_API_KEY: ${GROQ_API_KEY:-}
+      GROQ_API_BASE_URL: ${GROQ_API_BASE_URL:-https://api.groq.com/openai/v1}
+      GROQ_MODEL: ${GROQ_MODEL:-openai/gpt-oss-120b}
+      GROQ_VISUALS_MODEL: ${GROQ_VISUALS_MODEL:-openai/gpt-oss-120b}
+      GROQ_EXPLAINER_MODEL: ${GROQ_EXPLAINER_MODEL:-openai/gpt-oss-120b}
       OPENROUTER_API_KEY: ${OPENROUTER_API_KEY:-}
       OPENROUTER_API_BASE_URL: ${OPENROUTER_API_BASE_URL:-https://openrouter.ai/api/v1}
       OPENROUTER_QUIZ_MODEL: ${OPENROUTER_QUIZ_MODEL:-openai/gpt-5-mini}
@@ -142,6 +167,9 @@ services:
       OLLAMA_URL: "http://ollama:11434"
       RAG_SERVICE_URL: "http://rag:3003"
       QUIZ_SERVICE_URL: "http://quiz:3005"
+      PRACTICE_SERVICE_URL: "http://practice:3007"
+      DISCOVER_SERVICE_URL: "http://discover:3008"
+      PSV_SERVICE_URL: "http://psv:3011"
       ANALYTICS_URL: "http://analytics:3004"
       INTERNAL_SERVICE_TOKEN: ${INTERNAL_SERVICE_TOKEN}
       COMFYUI_URL: "http://comfyui:8188"
@@ -163,6 +191,12 @@ services:
         condition: service_healthy
       rag:
         condition: service_started
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:3002/health || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 20s
     labels:
       - "traefik.enable=true"
       - "traefik.http.routers.ai.rule=PathPrefix(`/api/ai`)"
@@ -214,6 +248,7 @@ services:
     environment:
       AUTH_SERVICE_URL: "http://auth:3001"
       RAG_SERVICE_URL: "http://rag:3003"
+      # Demo corpus only. Point this at any school manifest; RAG does not care.
       TEXTBOOK_SEED_MANIFEST: "/app/seed-data/ncert/class-8-textbooks.json"
       AUTO_SEED_TEXTBOOKS: ${AUTO_SEED_TEXTBOOKS:-true}
       SEED_TEACHER_EMAIL: ${SEED_TEACHER_EMAIL:-teacher@demo.com}
@@ -234,12 +269,14 @@ services:
              npx prisma db push --schema=prisma/schema.prisma ||
              true && node server.js"
     environment:
-      DATABASE_URL: "postgresql://postgres:${DB_PASSWORD}@postgres:5432/roognis?schema=quiz_db"
+      DATABASE_URL: "postgresql://postgres:${DB_PASSWORD}@postgres:5432/roognis?schema=quiz_db&connection_limit=10&pool_timeout=10"
       JWT_SECRET: ${JWT_SECRET}
       INTERNAL_SERVICE_TOKEN: ${INTERNAL_SERVICE_TOKEN}
       RAG_SERVICE_URL: "http://rag:3003"
       AI_SERVICE_URL: "http://ai:3002"
       ANALYTICS_URL: "http://analytics:3004"
+      PSV_SERVICE_URL: "http://psv:3011"
+      KG_SERVICE_URL: "http://kg:3012"
       QUIZ_QUESTION_COUNT: ${QUIZ_QUESTION_COUNT:-10}
       PORT: 3005
       NODE_ENV: production
@@ -250,11 +287,317 @@ services:
         condition: service_started
       ai:
         condition: service_started
+      psv:
+        condition: service_started
+      kg:
+        condition: service_started
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:3005/health || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 20s
     labels:
       - "traefik.enable=true"
       - "traefik.http.routers.quiz.rule=PathPrefix(`/api/quiz`)"
       - "traefik.http.routers.quiz.entrypoints=web"
       - "traefik.http.services.quiz.loadbalancer.server.port=3005"
+    restart: unless-stopped
+
+  # ── Instant practice content (services/practice) ────────────────────────────
+  # A standalone service, deliberately: ungated summary/flashcard/quiz
+  # generation that must never share a status enum or a gate with the
+  # teacher-approved Quiz pipeline above. See CLAUDE.md / HANDOFF.md for why
+  # this is a 7th service against MASTERCONTEXT.md §6's 4 sanctioned names.
+  practice:
+    build: ./services/practice
+    command: >
+      sh -c "[ -f prisma/schema.prisma ] &&
+             npx prisma db push --schema=prisma/schema.prisma ||
+             true && node server.js"
+    environment:
+      DATABASE_URL: "postgresql://postgres:${DB_PASSWORD}@postgres:5432/roognis?schema=practice_db&connection_limit=10&pool_timeout=10"
+      JWT_SECRET: ${JWT_SECRET}
+      INTERNAL_SERVICE_TOKEN: ${INTERNAL_SERVICE_TOKEN}
+      RAG_SERVICE_URL: "http://rag:3003"
+      ANALYTICS_URL: "http://analytics:3004"
+      PSV_SERVICE_URL: "http://psv:3011"
+      GROQ_API_KEY: ${GROQ_API_KEY:-}
+      GROQ_API_BASE_URL: ${GROQ_API_BASE_URL:-https://api.groq.com/openai/v1}
+      GROQ_MODEL: ${GROQ_MODEL:-openai/gpt-oss-120b}
+      OPENROUTER_API_KEY: ${OPENROUTER_API_KEY:-}
+      OPENROUTER_API_BASE_URL: ${OPENROUTER_API_BASE_URL:-https://openrouter.ai/api/v1}
+      OPENROUTER_PRACTICE_MODEL: ${OPENROUTER_PRACTICE_MODEL:-openai/gpt-5-mini}
+      OPENROUTER_SITE_URL: ${OPENROUTER_SITE_URL:-}
+      OPENROUTER_APP_NAME: ${OPENROUTER_APP_NAME:-Roognis}
+      PORT: 3007
+      NODE_ENV: production
+    depends_on:
+      postgres:
+        condition: service_healthy
+      rag:
+        condition: service_started
+      psv:
+        condition: service_started
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:3007/health || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 20s
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.practice.rule=PathPrefix(`/api/practice`)"
+      - "traefik.http.routers.practice.entrypoints=web"
+      - "traefik.http.services.practice.loadbalancer.server.port=3007"
+    restart: unless-stopped
+
+  discover:
+    build: ./services/discover
+    command: >
+      sh -c "[ -f prisma/schema.prisma ] &&
+             npx prisma db push --schema=prisma/schema.prisma ||
+             true && node server.js"
+    environment:
+      DATABASE_URL: "postgresql://postgres:${DB_PASSWORD}@postgres:5432/roognis?schema=discover_db&connection_limit=10&pool_timeout=10"
+      JWT_SECRET: ${JWT_SECRET}
+      INTERNAL_SERVICE_TOKEN: ${INTERNAL_SERVICE_TOKEN}
+      AI_SERVICE_URL: "http://ai:3002"
+      ANALYTICS_URL: "http://analytics:3004"
+      PREFERENCE_GNN_URL: "http://preference-gnn:3013"
+      PREFERENCE_GNN_TRAINER_URL: "http://preference-gnn-trainer:3016"
+      DECISION_SERVICE_URL: "http://decisions:3014"
+      PREFERENCE_REFRESH_ENABLED: ${PREFERENCE_REFRESH_ENABLED:-true}
+      PREFERENCE_REFRESH_INTERVAL_MS: ${PREFERENCE_REFRESH_INTERVAL_MS:-86400000}
+      # No key => no agentic hunt, RSS feed only. The stack still boots and the
+      # Discover tab still works; see services/discover/search/provider.js.
+      TAVILY_API_KEY: ${TAVILY_API_KEY:-}
+      TAVILY_API_BASE_URL: ${TAVILY_API_BASE_URL:-https://api.tavily.com}
+      DISCOVER_HUNT_ENABLED: ${DISCOVER_HUNT_ENABLED:-true}
+      DISCOVER_HUNT_INTERVAL_MS: ${DISCOVER_HUNT_INTERVAL_MS:-10800000}
+      DISCOVER_HUNT_MAX_TOPICS_PER_RUN: ${DISCOVER_HUNT_MAX_TOPICS_PER_RUN:-12}
+      DISCOVER_RSS_ENABLED: ${DISCOVER_RSS_ENABLED:-true}
+      # No key => no video hunt, article/RSS feed only. The stack still boots
+      # and Discover still works; see services/discover/search/youtube.js.
+      YOUTUBE_API_KEY: ${YOUTUBE_API_KEY:-}
+      YOUTUBE_API_BASE_URL: ${YOUTUBE_API_BASE_URL:-https://www.googleapis.com/youtube/v3}
+      DISCOVER_VIDEO_HUNT_ENABLED: ${DISCOVER_VIDEO_HUNT_ENABLED:-true}
+      DISCOVER_VIDEO_HUNT_INTERVAL_MS: ${DISCOVER_VIDEO_HUNT_INTERVAL_MS:-86400000}
+      DISCOVER_VIDEO_HUNT_MAX_TOPICS_PER_RUN: ${DISCOVER_VIDEO_HUNT_MAX_TOPICS_PER_RUN:-3}
+      DISCOVER_VIDEO_HUNT_TOPIC_COOLDOWN_MS: ${DISCOVER_VIDEO_HUNT_TOPIC_COOLDOWN_MS:-86400000}
+      DISCOVER_VIDEO_HUNT_MAX_CHANNEL_ENRICH_PER_RUN: ${DISCOVER_VIDEO_HUNT_MAX_CHANNEL_ENRICH_PER_RUN:-5}
+      DISCOVER_VIDEO_HUNT_DAILY_SEARCH_BUDGET: ${DISCOVER_VIDEO_HUNT_DAILY_SEARCH_BUDGET:-3000}
+      # "channelId:Label,channelId2:Label Two" — cold-start trust seed, IDs not
+      # display names. See services/discover/video/trust.js.
+      DISCOVER_VIDEO_TRUSTED_CHANNELS: ${DISCOVER_VIDEO_TRUSTED_CHANNELS:-}
+      GROQ_API_KEY: ${GROQ_API_KEY:-}
+      GROQ_API_BASE_URL: ${GROQ_API_BASE_URL:-https://api.groq.com/openai/v1}
+      GROQ_MODEL: ${GROQ_MODEL:-openai/gpt-oss-120b}
+      OPENROUTER_API_KEY: ${OPENROUTER_API_KEY:-}
+      OPENROUTER_API_BASE_URL: ${OPENROUTER_API_BASE_URL:-https://openrouter.ai/api/v1}
+      OPENROUTER_HUNT_MODEL: ${OPENROUTER_HUNT_MODEL:-openai/gpt-5-mini}
+      OPENROUTER_INTEREST_MODEL: ${OPENROUTER_INTEREST_MODEL:-openai/gpt-5-mini}
+      OPENROUTER_VIDEO_HUNT_MODEL: ${OPENROUTER_VIDEO_HUNT_MODEL:-openai/gpt-5-mini}
+      OPENROUTER_SITE_URL: ${OPENROUTER_SITE_URL:-}
+      OPENROUTER_APP_NAME: ${OPENROUTER_APP_NAME:-Roognis}
+      PORT: 3008
+      NODE_ENV: production
+    depends_on:
+      postgres:
+        condition: service_healthy
+      ai:
+        condition: service_started
+      preference-gnn:
+        condition: service_started
+      preference-gnn-trainer:
+        condition: service_started
+      decisions:
+        condition: service_started
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:3008/health || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 20s
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.discover.rule=PathPrefix(`/api/discover`)"
+      - "traefik.http.routers.discover.entrypoints=web"
+      - "traefik.http.services.discover.loadbalancer.server.port=3008"
+    restart: unless-stopped
+
+  # ── Dual-graph learner state ───────────────────────────────────────────────
+  kg:
+    build: ./services/kg
+    environment:
+      NEO4J_URI: "bolt://neo4j:7687"
+      NEO4J_USER: neo4j
+      NEO4J_PASSWORD: ${NEO4J_PASSWORD:-roognis-graph-change-me}
+      INTERNAL_SERVICE_TOKEN: ${INTERNAL_SERVICE_TOKEN}
+      KG_TEST_MODE: "false"
+      PORT: 3012
+    depends_on:
+      neo4j:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:3012/health', timeout=3)"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 25s
+    restart: unless-stopped
+
+  preference-gnn:
+    build: ./services/gnn
+    environment:
+      INTERNAL_SERVICE_TOKEN: ${INTERNAL_SERVICE_TOKEN}
+      GNN_LANE: preference
+      GNN_MODEL_ARTIFACT: /models/preference/model.json
+      GNN_MIN_PREFERENCE_COVERAGE: ${GNN_MIN_PREFERENCE_COVERAGE:-3}
+      GNN_MIN_CONFIDENCE: ${GNN_MIN_CONFIDENCE:-0.55}
+      GNN_MAX_MODEL_AGE_HOURS: ${GNN_MAX_MODEL_AGE_HOURS:-72}
+    volumes:
+      - ./services/gnn/model-artifacts/preference:/models/preference:ro
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:3013/health', timeout=3)"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 20s
+    restart: unless-stopped
+
+  preference-gnn-trainer:
+    build: ./services/gnn
+    command: ["uvicorn", "trainer_main:app", "--host", "0.0.0.0", "--port", "3016"]
+    environment:
+      INTERNAL_SERVICE_TOKEN: ${INTERNAL_SERVICE_TOKEN}
+      GNN_LANE: preference
+      GNN_MODEL_ARTIFACT: /models/preference/model.json
+    volumes:
+      # Only this lane's trainer may mutate this artifact directory. The
+      # corresponding inference service mounts the same directory read-only.
+      - ./services/gnn/model-artifacts/preference:/models/preference
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:3016/health', timeout=3)"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 20s
+    restart: unless-stopped
+
+  knowledge-gnn:
+    build: ./services/gnn
+    environment:
+      INTERNAL_SERVICE_TOKEN: ${INTERNAL_SERVICE_TOKEN}
+      GNN_LANE: knowledge
+      GNN_MODEL_ARTIFACT: /models/knowledge/model.json
+      GNN_MIN_KNOWLEDGE_COVERAGE: ${GNN_MIN_KNOWLEDGE_COVERAGE:-5}
+      GNN_MIN_CONFIDENCE: ${GNN_MIN_CONFIDENCE:-0.55}
+      GNN_MAX_MODEL_AGE_HOURS: ${GNN_MAX_MODEL_AGE_HOURS:-72}
+    volumes:
+      - ./services/gnn/model-artifacts/knowledge:/models/knowledge:ro
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:3013/health', timeout=3)"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 20s
+    restart: unless-stopped
+
+  knowledge-gnn-trainer:
+    build: ./services/gnn
+    command: ["uvicorn", "trainer_main:app", "--host", "0.0.0.0", "--port", "3016"]
+    environment:
+      INTERNAL_SERVICE_TOKEN: ${INTERNAL_SERVICE_TOKEN}
+      GNN_LANE: knowledge
+      GNN_MODEL_ARTIFACT: /models/knowledge/model.json
+    volumes:
+      - ./services/gnn/model-artifacts/knowledge:/models/knowledge
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:3016/health', timeout=3)"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 20s
+    restart: unless-stopped
+
+  decisions:
+    build: ./services/decisions
+    environment:
+      INTERNAL_SERVICE_TOKEN: ${INTERNAL_SERVICE_TOKEN}
+      GNN_MIN_CONFIDENCE: ${GNN_MIN_CONFIDENCE:-0.55}
+      GNN_MAX_BLEND_WEIGHT: ${GNN_MAX_BLEND_WEIGHT:-0.6}
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:3014/health', timeout=3)"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 20s
+    restart: unless-stopped
+
+  psv:
+    build: ./services/psv
+    environment:
+      DATABASE_URL: "postgresql://postgres:${DB_PASSWORD}@postgres:5432/roognis"
+      PSV_DB_SCHEMA: psv_db
+      JWT_SECRET: ${JWT_SECRET}
+      INTERNAL_SERVICE_TOKEN: ${INTERNAL_SERVICE_TOKEN}
+      GNN_SERVICE_URL: "http://knowledge-gnn:3013"
+      GNN_TRAINER_URL: "http://knowledge-gnn-trainer:3016"
+      KG_SERVICE_URL: "http://kg:3012"
+      DECISION_SERVICE_URL: "http://decisions:3014"
+      DAILY_REFRESH_ENABLED: ${ACADEMIC_DAILY_REFRESH_ENABLED:-true}
+      DAILY_REFRESH_HOUR_UTC: ${ACADEMIC_DAILY_REFRESH_HOUR_UTC:-2}
+      PORT: 3011
+    depends_on:
+      postgres:
+        condition: service_healthy
+      kg:
+        condition: service_started
+      knowledge-gnn:
+        condition: service_started
+      knowledge-gnn-trainer:
+        condition: service_started
+      decisions:
+        condition: service_started
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:3011/health', timeout=3)"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 25s
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.psv.rule=PathPrefix(`/api/psv`)"
+      - "traefik.http.routers.psv.entrypoints=web"
+      - "traefik.http.services.psv.loadbalancer.server.port=3011"
+    restart: unless-stopped
+
+  privacy:
+    build: ./services/privacy
+    environment:
+      JWT_SECRET: ${JWT_SECRET}
+      INTERNAL_SERVICE_TOKEN: ${INTERNAL_SERVICE_TOKEN}
+      LMS_SERVICE_URL: "http://lms:3006"
+      PSV_SERVICE_URL: "http://psv:3011"
+      PRIVACY_MIN_COHORT_SIZE: ${PRIVACY_MIN_COHORT_SIZE:-5}
+      PORT: 3015
+    depends_on:
+      lms:
+        condition: service_started
+      psv:
+        condition: service_started
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:3015/health', timeout=3)"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 20s
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.privacy.rule=PathPrefix(`/api/privacy`)"
+      - "traefik.http.routers.privacy.entrypoints=web"
+      - "traefik.http.services.privacy.loadbalancer.server.port=3015"
     restart: unless-stopped
 
   analytics:
@@ -264,7 +607,7 @@ services:
              npx prisma db push --schema=prisma/schema.prisma ||
              true && node server.js"
     environment:
-      DATABASE_URL: "postgresql://postgres:${DB_PASSWORD}@postgres:5432/roognis?schema=analytics_db"
+      DATABASE_URL: "postgresql://postgres:${DB_PASSWORD}@postgres:5432/roognis?schema=analytics_db&connection_limit=10&pool_timeout=10"
       JWT_SECRET: ${JWT_SECRET}
       INTERNAL_SERVICE_TOKEN: ${INTERNAL_SERVICE_TOKEN}
       PORT: 3004
@@ -272,6 +615,12 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:3004/health || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 20s
     labels:
       - "traefik.enable=true"
       - "traefik.http.routers.analytics.rule=PathPrefix(`/api/analytics`)"
@@ -279,8 +628,60 @@ services:
       - "traefik.http.services.analytics.loadbalancer.server.port=3004"
     restart: unless-stopped
 
+  # ── LMS / Classroom (Google-Classroom parity, ported from v2) ───────────────
+  lms:
+    build: ./services/lms
+    environment:
+      DATABASE_URL: "postgresql://postgres:${DB_PASSWORD}@postgres:5432/roognis"
+      LMS_DB_SCHEMA: lms_db
+      JWT_SECRET: ${JWT_SECRET}
+      INTERNAL_SERVICE_TOKEN: ${INTERNAL_SERVICE_TOKEN}
+      ANALYTICS_URL: "http://analytics:3004"
+      RAG_SERVICE_URL: "http://rag:3003"
+      PORT: 3006
+      NODE_ENV: production
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:3006/health || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.lms.rule=PathPrefix(`/api/lms`)"
+      - "traefik.http.routers.lms.entrypoints=web"
+      - "traefik.http.services.lms.loadbalancer.server.port=3006"
+    restart: unless-stopped
+
+  # ── Web SPA (React + Vite) — teacher/student LMS UI at /classroom ────────────
+  web:
+    build: ./web
+    environment:
+      API_PROXY_TARGET: "http://traefik"
+      HOST: "0.0.0.0"
+      PORT: 3000
+      NODE_ENV: production
+    depends_on:
+      auth:
+        condition: service_healthy
+      lms:
+        condition: service_started
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.classroom.rule=PathPrefix(`/classroom`)"
+      - "traefik.http.routers.classroom.entrypoints=web"
+      - "traefik.http.middlewares.classroom-strip.stripprefix.prefixes=/classroom"
+      - "traefik.http.routers.classroom.middlewares=classroom-strip"
+      - "traefik.http.services.classroom.loadbalancer.server.port=3000"
+    restart: unless-stopped
+
   frontend:
-    build: ./frontend
+    build:
+      context: .
+      dockerfile: frontend/Dockerfile
     environment:
       NEXT_PUBLIC_API_URL: "/api"
       API_PROXY_TARGET: "http://traefik"

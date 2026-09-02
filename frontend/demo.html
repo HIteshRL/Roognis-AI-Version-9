@@ -1,0 +1,239 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Roognis Visuals Demo</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        html, body { height: 100%; }
+        body { 
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            min-height: 100vh;
+            padding: 20px;
+        }
+        .container { 
+            max-width: 1600px;
+            width: 100%;
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 24px;
+        }
+        .card {
+            background: white;
+            border-radius: 16px;
+            box-shadow: 0 20px 60px rgba(0,0,0,0.3);
+            overflow: hidden;
+            display: flex;
+            flex-direction: column;
+            max-height: 90vh;
+        }
+        .card-header {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 24px;
+            font-size: 18px;
+            font-weight: 600;
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            flex-shrink: 0;
+        }
+        .emoji { font-size: 24px; }
+        .card-body {
+            flex: 1;
+            overflow: auto;
+            padding: 0;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            background: #f8f9fb;
+            min-height: 400px;
+        }
+        .svg-container {
+            width: 100%;
+            height: 100%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 20px;
+            overflow: auto;
+        }
+        .svg-container svg {
+            max-width: 100%;
+            height: auto;
+            filter: drop-shadow(0 4px 12px rgba(0,0,0,0.1));
+        }
+        iframe {
+            width: 100%;
+            height: 100%;
+            border: none;
+            display: block;
+        }
+        .info {
+            background: rgba(102, 126, 234, 0.1);
+            border-top: 1px solid #e5e7eb;
+            padding: 16px 24px;
+            font-size: 13px;
+            color: #4b5563;
+            line-height: 1.6;
+            flex-shrink: 0;
+        }
+        .info strong { color: #667eea; }
+        @media (max-width: 1024px) {
+            .container { grid-template-columns: 1fr; }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <!-- SVG Concept Map -->
+        <div class="card">
+            <div class="card-header">
+                <span class="emoji">🗂️</span>
+                <span>SVG Concept Map</span>
+            </div>
+            <div class="card-body">
+                <div class="svg-container" id="svg-container"></div>
+            </div>
+            <div class="info">
+                <strong>Inert Tier:</strong> Server renders deterministic SVG from JSON spec. No interactivity, pure information architecture.
+            </div>
+        </div>
+
+        <!-- HTML Explainer -->
+        <div class="card">
+            <div class="card-header">
+                <span class="emoji">⚡</span>
+                <span>Interactive Explainer</span>
+            </div>
+            <div class="card-body">
+                <iframe id="explainer-frame" sandbox="allow-scripts" title="Interactive explainer"></iframe>
+            </div>
+            <div class="info">
+                <strong>Executable Tier:</strong> LLM-authored code in sandbox + CSP + static scan. User-interactive, ephemeral.
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // SVG Concept Map
+<svg class="rv-svg" viewBox="0 0 328 450" role="img" aria-labelledby="rv-90940ad12d124855821b513788967467-title rv-90940ad12d124855821b513788967467-desc" xmlns="http://www.w3.org/2000/svg"><title id="rv-90940ad12d124855821b513788967467-title">Force and Motion</title><desc id="rv-90940ad12d124855821b513788967467-desc">Concept map: Force and Motion. 5 ideas, 5 relationships. Force causes Motion. Motion has Speed. Rest changes to Motion. State of Motion includes Rest. State of Motion includes Motion.</desc><defs><marker id="rv-90940ad12d124855821b513788967467-arrow" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path class="arrow" d="M 0 1 L 7 4 L 0 7 z"/></marker></defs><g class="rv-edges"><g class="rv-edge"><path class="edge" d="M 86.0 72.0 V 153.0 H 164.0 V 258.0" marker-end="url(#rv-90940ad12d124855821b513788967467-arrow)"/><text class="edge-label" x="125.0" y="149.0" text-anchor="middle">causes</text></g><g class="rv-edge"><path class="edge" d="M 164.0 312.0 V 333.0 H 164.0 V 378.0" marker-end="url(#rv-90940ad12d124855821b513788967467-arrow)"/><text class="edge-label" x="164.0" y="329.0" text-anchor="middle">has</text></g><g class="rv-edge"><path class="edge" d="M 164.0 192.0 V 213.0 H 164.0 V 258.0" marker-end="url(#rv-90940ad12d124855821b513788967467-arrow)"/><text class="edge-label" x="164.0" y="209.0" text-anchor="middle">changes to</text></g><g class="rv-edge"><path class="edge" d="M 242.0 72.0 V 93.0 H 164.0 V 138.0" marker-end="url(#rv-90940ad12d124855821b513788967467-arrow)"/><text class="edge-label" x="203.0" y="89.0" text-anchor="middle">includes</text></g><g class="rv-edge"><path class="edge" d="M 242.0 72.0 V 159.0 H 164.0 V 258.0" marker-end="url(#rv-90940ad12d124855821b513788967467-arrow)"/><text class="edge-label" x="203.0" y="155.0" text-anchor="middle">includes</text></g></g><g class="rv-nodes"><g class="rv-node"><rect class="node" x="18.0" y="18.0" width="136.0" height="54.0" rx="10"/><text class="node-label" text-anchor="middle"><tspan x="86.0" y="49.0">Force</tspan></text></g><g class="rv-node"><rect class="node" x="96.0" y="258.0" width="136.0" height="54.0" rx="10"/><text class="node-label" text-anchor="middle"><tspan x="164.0" y="289.0">Motion</tspan></text></g><g class="rv-node"><rect class="node" x="96.0" y="138.0" width="136.0" height="54.0" rx="10"/><text class="node-label" text-anchor="middle"><tspan x="164.0" y="169.0">Rest</tspan></text></g><g class="rv-node"><rect class="node" x="96.0" y="378.0" width="136.0" height="54.0" rx="10"/><text class="node-label" text-anchor="middle"><tspan x="164.0" y="409.0">Speed</tspan></text></g><g class="rv-node"><rect class="node" x="174.0" y="18.0" width="136.0" height="54.0" rx="10"/><text class="node-label" text-anchor="middle"><tspan x="242.0" y="49.0">State of Motion</tspan></text></g></g></svg>
+        document.getElementById('svg-container').innerHTML = document.querySelector('svg').parentElement.innerHTML;
+        document.querySelector('svg').parentElement.remove();
+
+        // Explainer HTML
+        const explainerHTML = `<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data:; form-action 'none'; base-uri 'none'">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>NewtonEXPLAINERPLACEHOLDER#39;s Laws Demonstration</title>
+<style>
+:root {
+  --bg: #f9f7f3;
+  --surface: #ffffff;
+  --surface-2: #f2ece1;
+  --ink: #1a2d47;
+  --ink-muted: #5f5248;
+  --line: #e4dbcc;
+  --line-strong: #d8ccb8;
+  --accent: #c4965f;
+  --accent-ink: #1a2d47;
+  --accent-soft: #f3e4d0;
+  --green: #4a7c59;
+  --blue: #3d5a80;
+  --amber: #a8752e;
+  --red: #a4453b;
+  --font-body: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+  color-scheme: light dark;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #0f1826;
+    --surface: #16233a;
+    --surface-2: #1c2c47;
+    --ink: #f2ede4;
+    --ink-muted: #b9ac9d;
+    --line: #2b3a56;
+    --line-strong: #3a4c6c;
+    --accent: #d3a874;
+    --accent-ink: #14213a;
+    --accent-soft: #2b2419;
+    --green: #6ea37c;
+    --blue: #6f93b8;
+    --amber: #d19b4f;
+    --red: #c6685c;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #0f1826;
+  --surface: #16233a;
+  --surface-2: #1c2c47;
+  --ink: #f2ede4;
+  --ink-muted: #b9ac9d;
+  --line: #2b3a56;
+  --line-strong: #3a4c6c;
+  --accent: #d3a874;
+  --accent-ink: #14213a;
+  --accent-soft: #2b2419;
+  --green: #6ea37c;
+  --blue: #6f93b8;
+  --amber: #d19b4f;
+  --red: #c6685c;
+}
+:root[data-theme="light"] {
+  --bg: #f9f7f3;
+  --surface: #ffffff;
+  --surface-2: #f2ece1;
+  --ink: #1a2d47;
+  --ink-muted: #5f5248;
+  --line: #e4dbcc;
+  --line-strong: #d8ccb8;
+  --accent: #c4965f;
+  --accent-ink: #1a2d47;
+  --accent-soft: #f3e4d0;
+  --green: #4a7c59;
+  --blue: #3d5a80;
+  --amber: #a8752e;
+  --red: #a4453b;
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; padding: 0; }
+html { background: var(--surface); }
+body {
+  font-family: var(--font-body);
+  color: var(--ink);
+  background: var(--surface);
+  font-size: 14px;
+  line-height: 1.5;
+  padding: 12px;
+}
+svg { max-width: 100%; height: auto; }
+img, canvas { max-width: 100%; }
+button, input, select { font: inherit; color: inherit; }
+button { color: var(--ink); background: var(--surface-2); border: 1px solid var(--line);
+  border-radius: 8px; min-height: 40px; padding: 0 14px; cursor: pointer; }
+button:hover { border-color: var(--line-strong); }
+#container { background-color: var(--surface); } #object { background-color: var(--surface-2); } button { background-color: var(--accent); color: var(--ink); }
+</style>
+</head>
+<body>
+<div id='container' style='width: 100%; height: 400px; position: relative; border: 1px solid var(--line);'><div id='object' style='width: 50px; height: 50px; position: absolute; top: 50%; left: 50%; background-color: var(--surface-2);'>Object</div><button id='apply-force' style='position: absolute; top: 10px; left: 10px;'>Apply Force</button><button id='stop-force' style='position: absolute; top: 10px; left: 100px;'>Stop Force</button><p id='velocity' style='position: absolute; top: 10px; left: 200px;'>Velocity: 0</p></div>
+<script>
+(function(){
+let velocity = 0; let intervalId; document.getElementById('apply-force').addEventListener('click', () => { intervalId = setInterval(() => { velocity += 1; document.getElementById('velocity').innerText = 'Velocity: ' + velocity; document.getElementById('object').style.left = (50 + velocity) + '%'; }, 100); }); document.getElementById('stop-force').addEventListener('click', () => { clearInterval(intervalId); velocity = 0; document.getElementById('velocity').innerText = 'Velocity: ' + velocity; document.getElementById('object').style.left = '50%'; });
+})();
+</script>
+</body>
+</html>
+`;
+        document.getElementById('explainer-frame').srcdoc = explainerHTML;
+    </script>
+</body>
+</html>

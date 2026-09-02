@@ -1,9 +1,10 @@
 FROM node:20-alpine
-WORKDIR /app
+WORKDIR /app/frontend
 
 RUN apk add --no-cache curl
 
-COPY . .
+COPY frontend/ ./
+COPY packages/learning-events/ /app/packages/learning-events/
 
 EXPOSE 3000
 

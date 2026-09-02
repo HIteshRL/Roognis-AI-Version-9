@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import re
+import unicodedata
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -19,6 +20,11 @@ from models import (
     RelationshipType,
     RetrievalChunk,
 )
+
+# Board and curriculum are opaque teacher-supplied labels. Every ingested PDF
+# is a textbook for retrieval; we never special-case a publisher (including the
+# demo NCERT Class-8 set under seed-data/ncert/).
+TEXTBOOK_SOURCE_TYPE = "textbook"
 
 
 @dataclass(frozen=True)
@@ -45,11 +51,14 @@ OBSERVATION_RE = re.compile(r"\b(observation|observe|you will notice)\b", re.IGN
 CONCLUSION_RE = re.compile(r"\b(conclusion|we conclude|therefore)\b", re.IGNORECASE)
 EXAMPLE_RE = re.compile(r"\b(example|for example|e\.g\.)\b", re.IGNORECASE)
 APPLICATION_RE = re.compile(r"\b(application|used in|uses of|dentist|daily life)\b", re.IGNORECASE)
-FIGURE_RE = re.compile(r"\b(fig\.|figure|diagram|image)\b", re.IGNORECASE)
+FIGURE_RE = re.compile(r"\b(fig\.|figure(?!\s+out)|diagram|image)\b", re.IGNORECASE)
 TABLE_RE = re.compile(r"\b(table)\b", re.IGNORECASE)
 SUMMARY_RE = re.compile(r"\b(summary|recap|what we have learnt|key points)\b", re.IGNORECASE)
 LAW_RE = re.compile(r"\b(law|principle)\b", re.IGNORECASE)
-FORMULA_RE = re.compile(r"\b(formula|equation)\b|[A-Za-z]\s*=\s*[^=]", re.IGNORECASE)
+# The letter=value alternative must span the whole segment (not just appear
+# somewhere inside a longer sentence) so a casual "for example x = y" aside
+# doesn't get classified as a standalone formula.
+FORMULA_RE = re.compile(r"\b(formula|equation)\b|^[A-Za-z]\s*=\s*[^=]+$", re.IGNORECASE)
 EXERCISE_RE = re.compile(r"\b(exercise|questions?|answer the following)\b|\?$", re.IGNORECASE)
 SAFETY_RE = re.compile(r"\b(safety|caution|warning)\b", re.IGNORECASE)
 EXTENSION_RE = re.compile(r"\b(extension|learn more|beyond)\b", re.IGNORECASE)
@@ -100,13 +109,9 @@ def parse_pdf_blocks(path: Path) -> tuple[list[ParsedBlock], int]:
     with fitz.open(path) as pdf:
         order = 0
         for page_index, page in enumerate(pdf, start=1):
-            blocks = sorted(
-                page.get_text("blocks"),
-                key=lambda block: (round(block[1], 1), round(block[0], 1)),
-            )
+            raw_blocks = [block for block in page.get_text("blocks") if len(block) >= 5]
+            blocks = order_blocks_reading_order(raw_blocks, page.rect.width)
             for block in blocks:
-                if len(block) < 5:
-                    continue
                 text = normalize_block_text(str(block[4]))
                 if not text:
                     continue
@@ -125,19 +130,98 @@ def parse_pdf_blocks(path: Path) -> tuple[list[ParsedBlock], int]:
         return parsed, pdf.page_count
 
 
+def order_blocks_reading_order(blocks: list[tuple], page_width: float) -> list[tuple]:
+    """Order page blocks in true reading order.
+
+    A plain y-then-x sort interleaves left/right column blocks by raw
+    vertical proximity, which scrambles a two-column page (the right
+    column's first paragraph often starts above the left column's second).
+    When the page genuinely has content on both sides of the midpoint, read
+    the full left column top-to-bottom, then the full right column, with any
+    full-width block (a heading spanning the page) inserted at its correct
+    vertical position relative to the column content around it. Single-column
+    pages fall back to the plain sort untouched.
+    """
+    if not blocks:
+        return []
+
+    midpoint = page_width / 2
+    left_col: list[tuple] = []
+    right_col: list[tuple] = []
+    full_width: list[tuple] = []
+    for block in blocks:
+        x0, x1 = block[0], block[2]
+        if x1 <= midpoint + 4:
+            left_col.append(block)
+        elif x0 >= midpoint - 4:
+            right_col.append(block)
+        else:
+            full_width.append(block)
+
+    if not left_col or not right_col:
+        return sorted(blocks, key=lambda b: (round(b[1], 1), round(b[0], 1)))
+
+    left_col.sort(key=lambda b: (round(b[1], 1), round(b[0], 1)))
+    right_col.sort(key=lambda b: (round(b[1], 1), round(b[0], 1)))
+    full_width.sort(key=lambda b: (round(b[1], 1), round(b[0], 1)))
+
+    ordered: list[tuple] = []
+    li, ri, fi = 0, 0, 0
+    while li < len(left_col) or ri < len(right_col) or fi < len(full_width):
+        next_full_y = full_width[fi][1] if fi < len(full_width) else float("inf")
+        left_y = left_col[li][1] if li < len(left_col) else float("inf")
+        right_y = right_col[ri][1] if ri < len(right_col) else float("inf")
+        if next_full_y <= min(left_y, right_y):
+            ordered.append(full_width[fi])
+            fi += 1
+        elif li < len(left_col):
+            ordered.append(left_col[li])
+            li += 1
+        elif ri < len(right_col):
+            ordered.append(right_col[ri])
+            ri += 1
+        else:
+            ordered.append(full_width[fi])
+            fi += 1
+    return ordered
+
+
 def normalize_block_text(text: str) -> str:
+    """Strip each line while preserving blank lines as paragraph breaks.
+
+    Deleting blank lines here (the previous behavior) meant
+    split_block_segments's blank-line split could never match, so every
+    multi-line block — a real paragraph break or just a mid-sentence line
+    wrap — was shredded one fragment per physical line.
+    """
     lines = [line.strip() for line in text.replace("\x00", " ").splitlines()]
-    return "\n".join(line for line in lines if line)
+    result: list[str] = []
+    prev_blank = False
+    for line in lines:
+        is_blank = line == ""
+        if is_blank and prev_blank:
+            continue
+        result.append(line)
+        prev_blank = is_blank
+    while result and result[0] == "":
+        result.pop(0)
+    while result and result[-1] == "":
+        result.pop()
+    return "\n".join(result)
 
 
 def split_block_segments(text: str) -> list[str]:
-    segments = [segment.strip() for segment in re.split(r"\n{2,}", text) if segment.strip()]
-    if len(segments) > 1:
-        return segments
-    lines = [line.strip() for line in text.splitlines() if line.strip()]
-    if len(lines) > 1:
-        return lines
-    return [text.strip()] if text.strip() else []
+    """Split a normalized block into paragraph-level segments.
+
+    A blank line signals a real paragraph break. Without one, the block's
+    physical line-wraps are rejoined into a single paragraph rather than
+    fragmented into one segment per line.
+    """
+    paragraphs = [segment.strip() for segment in re.split(r"\n{2,}", text) if segment.strip()]
+    return [
+        " ".join(line.strip() for line in paragraph.splitlines() if line.strip())
+        for paragraph in paragraphs
+    ]
 
 
 def detect_heading(text: str) -> tuple[bool, int | None]:
@@ -199,10 +283,18 @@ def persist_entities(
 
     current_section = chapter_entity
     current_section_title = document.chapter_name
+    # Tracks the open heading chain as (level, entity) pairs, root-first, so
+    # each new heading parents to the nearest shallower section instead of
+    # always the chapter. Level 0 is the chapter itself.
+    section_stack: list[tuple[int, EducationalEntity]] = [(0, chapter_entity)]
 
     for block in blocks:
         if block.is_heading:
             title = clean_heading_title(block.text)
+            level = block.heading_level or 1
+            while len(section_stack) > 1 and section_stack[-1][0] >= level:
+                section_stack.pop()
+            parent_section = section_stack[-1][1]
             canonical, created = get_or_create_canonical(
                 db,
                 document,
@@ -222,7 +314,7 @@ def persist_entities(
                 page=block.page,
                 section=title,
                 canonical_concept_id=canonical.id,
-                parent_id=chapter_entity.id,
+                parent_id=parent_section.id,
                 extra_metadata={
                     "objectKind": "section",
                     "headingLevel": block.heading_level,
@@ -230,8 +322,9 @@ def persist_entities(
                 },
             )
             entities_created += 1
-            relationships_created += create_parent_relationships(db, document, chapter_entity, section_entity)
+            relationships_created += create_parent_relationships(db, document, parent_section, section_entity)
             relationships_created += link_canonical_to_artifact(db, document, canonical, section_entity)
+            section_stack.append((level, section_entity))
             current_section = section_entity
             current_section_title = title
             continue
@@ -282,7 +375,7 @@ def get_or_create_canonical(
     section: str,
 ) -> tuple[EducationalEntity, bool]:
     normalized_title = normalize_concept_title(title) or document.chapter_name
-    key = normalized_title.casefold()
+    key = dedup_key_for_title(normalized_title)
     if key in canonical_by_key:
         return canonical_by_key[key], False
 
@@ -353,8 +446,7 @@ def entity_metadata(document: Document, *, page: int, section: str, extra: dict 
             "pageEnd": page,
         }
     )
-    if document.curriculum.upper() == "NCERT":
-        metadata["sourceType"] = "ncert_textbook"
+    metadata["sourceType"] = TEXTBOOK_SOURCE_TYPE
     if extra:
         metadata.update(extra)
     return metadata
@@ -368,8 +460,7 @@ def create_parent_relationships(
 ) -> int:
     create_relationship(db, document, parent.id, child.id, RelationshipType.HAS_CHILD)
     create_relationship(db, document, child.id, parent.id, RelationshipType.BELONGS_TO)
-    create_relationship(db, document, child.id, parent.id, RelationshipType.HAS_PARENT)
-    return 3
+    return 2
 
 
 def link_canonical_to_artifact(
@@ -411,6 +502,12 @@ def classify_educational_object(text: str) -> EntityType:
     stripped = text.strip()
     if SAFETY_RE.search(stripped):
         return EntityType.SAFETY
+    # Checked early, right after safety: "X is defined as Y" is a precise,
+    # unambiguous signal that should not be shadowed by an incidental keyword
+    # elsewhere in the same segment (a definition that happens to mention
+    # "for example", "law", "table", or "used in daily life").
+    if DEFINITION_RE.search(stripped) or looks_like_definition(stripped):
+        return EntityType.DEFINITION
     if ACTIVITY_RE.search(stripped):
         return EntityType.ACTIVITY
     if EXPERIMENT_RE.search(stripped):
@@ -437,8 +534,6 @@ def classify_educational_object(text: str) -> EntityType:
         return EntityType.QUESTION if stripped.endswith("?") else EntityType.EXERCISE
     if EXTENSION_RE.search(stripped):
         return EntityType.EXTENSION
-    if DEFINITION_RE.search(stripped) or looks_like_definition(stripped):
-        return EntityType.DEFINITION
     return EntityType.CONCEPT
 
 
@@ -502,6 +597,19 @@ def normalize_concept_title(title: str) -> str:
     title = re.sub(r"\s+", " ", title or "").strip(" :-")
     title = re.sub(r"^(chapter|section)\s+\d+(?:\.\d+)*\s*", "", title, flags=re.I)
     return title[:180]
+
+
+def dedup_key_for_title(title: str) -> str:
+    """Matching key for canonical-concept dedup, more aggressive than the
+    display title normalization above so "Newton's Laws" and "Newtons Laws"
+    (or a curly vs. straight apostrophe, common in PyMuPDF extraction) merge
+    into one canonical concept instead of fragmenting into two.
+    """
+    normalized = unicodedata.normalize("NFKC", title or "")
+    normalized = normalized.replace("’", "'").replace("‘", "'")
+    normalized = normalized.casefold()
+    normalized = re.sub(r"[^\w\s]", "", normalized)
+    return re.sub(r"\s+", " ", normalized).strip()
 
 
 def relationship_for_entity_type(entity_type: str) -> RelationshipType:

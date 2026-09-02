@@ -76,10 +76,33 @@ def test_upload_persists_document_and_returns_contract_response(client, token_fa
     assert payload["metadata"]["curriculum"] == "NCERT"
     assert payload["metadata"]["grade"] == 8
     assert payload["metadata"]["chapterNumber"] == 10
-    assert payload["metadata"]["sourceType"] == "ncert_textbook"
+    assert payload["metadata"]["sourceType"] == "textbook"
 
     storage_root = Path(app.state.settings.file_storage_path)
     assert (storage_root / "rag" / "uploads" / f"{payload['documentId']}.pdf").exists()
+
+
+def test_upload_treats_any_curriculum_as_a_textbook(client, token_factory):
+    response = upload_pdf(
+        client,
+        token_factory,
+        board="CIE",
+        curriculum="Cambridge",
+        book="Checkpoint Science",
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["metadata"]["board"] == "CIE"
+    assert payload["metadata"]["curriculum"] == "CAMBRIDGE"
+    assert payload["metadata"]["sourceType"] == "textbook"
+
+    with SessionLocal() as db:
+        chunks = db.scalars(
+            select(RetrievalChunk).where(RetrievalChunk.document_id == payload["documentId"])
+        ).all()
+    assert chunks
+    assert all(chunk.source.startswith("CAMBRIDGE Science Grade 8") for chunk in chunks)
 
 
 def test_status_returns_completed_chunking_progress(client, token_factory):
@@ -261,7 +284,7 @@ def test_upload_extracts_canonical_concepts_and_classified_entities(client, toke
     assert "Reflection of Light" in canonical_titles
     assert "Concave Mirror" in canonical_titles
     assert definition.canonical_concept_id
-    assert definition.metadata_json["sourceType"] == "ncert_textbook"
+    assert definition.metadata_json["sourceType"] == "textbook"
     assert relationships
 
 
@@ -289,6 +312,112 @@ def test_upload_generates_semantic_chunks_with_embedding_metadata(client, token_
     assert all(chunk.metadata_json["canonicalConceptId"] == chunk.canonical_concept_id for chunk in chunks)
     assert any("Dentists use concave mirrors" in chunk.text for chunk in chunks)
     assert any(chunk.chunk_type == "question" for chunk in chunks)
+
+
+def test_upload_generates_passage_chunks_from_real_paragraph_text(client, token_factory):
+    """Entity chunks are regex-classified sentence fragments; retrieval needs
+    real paragraph-length text to ground a tutor answer. This asserts the
+    passage chunker actually produces one, not just that entity chunking still
+    works (test_upload_generates_semantic_chunks_with_embedding_metadata
+    already covers that)."""
+    payload = upload_pdf(client, token_factory).json()
+
+    with SessionLocal() as db:
+        chunks = db.scalars(
+            select(RetrievalChunk)
+            .where(RetrievalChunk.document_id == payload["documentId"])
+            .order_by(RetrievalChunk.chunk_index.asc())
+        ).all()
+
+    passages = [chunk for chunk in chunks if chunk.chunk_type == "passage"]
+    assert passages
+
+    passage = passages[0]
+    assert passage.entity_id is None
+    assert passage.canonical_concept_id is None
+    assert passage.vector_id
+    assert passage.metadata_json["chunkType"] == "passage"
+    assert passage.metadata_json["entityType"] == "Passage"
+    assert passage.pedagogical_order >= 600_000
+    assert len(passage.text) >= 120
+    assert "Dentists use concave mirrors" in passage.text
+    # Headings encountered while merging blocks are prefixed onto the passage so
+    # a citation is self-contained instead of a bare, context-free line.
+    assert "Reflection of Light" in passage.text
+
+
+def test_passage_chunks_drop_fragments_below_the_minimum_length(client, token_factory):
+    """A document with only short, heading-separated lines should not emit a
+    passage chunk that's too small to be a useful citation."""
+    tiny_pdf = sample_pdf_bytes([
+        "1 Tiny Chapter",
+        "1.1 Short Section",
+        "Ok.",
+        "Exercise",
+    ])
+    client.cookies.set("jwt", token_factory(role="teacher"))
+    response = client.post(
+        "/api/rag/upload",
+        data={
+            "board": "CBSE",
+            "curriculum": "NCERT",
+            "grade": "8",
+            "subject": "Science",
+            "book": "Curiosity",
+            "chapterNumber": "11",
+            "chapterName": "Tiny Chapter",
+            "language": "English",
+            "edition": "2026-27",
+        },
+        files={"file": ("chapter 11.pdf", tiny_pdf, "application/pdf")},
+    )
+    payload = response.json()
+
+    with SessionLocal() as db:
+        chunks = db.scalars(
+            select(RetrievalChunk).where(RetrievalChunk.document_id == payload["documentId"])
+        ).all()
+
+    assert not [chunk for chunk in chunks if chunk.chunk_type == "passage"]
+
+
+def test_student_can_download_a_ready_document_file(client, token_factory):
+    payload = upload_pdf(client, token_factory).json()
+
+    client.cookies.set("jwt", token_factory(role="student"))
+    response = client.get(f"/api/rag/documents/{payload['documentId']}/file")
+
+    assert response.status_code == 200
+    assert response.headers["content-type"] == "application/pdf"
+    assert "inline" in response.headers["content-disposition"]
+    assert response.content.startswith(b"%PDF")
+
+
+def test_document_file_404s_for_a_non_ready_document(client, token_factory, monkeypatch):
+    def fail_extraction(*_args, **_kwargs):
+        raise RuntimeError("parser unavailable")
+
+    monkeypatch.setattr(rag_main, "run_entity_extraction", fail_extraction)
+    upload_pdf(client, token_factory)
+
+    with SessionLocal() as db:
+        document = db.scalar(select(Document).limit(1))
+        document_id = document.id
+
+    client.cookies.set("jwt", token_factory(role="student"))
+    file_response = client.get(f"/api/rag/documents/{document_id}/file")
+
+    assert file_response.status_code == 404
+
+
+def test_document_file_404s_for_another_schools_document(client, token_factory):
+    other_school = "33333333-3333-3333-3333-333333333333"
+    payload = upload_pdf(client, token_factory, token_overrides={"schoolId": other_school}).json()
+
+    client.cookies.set("jwt", token_factory(role="student"))
+    response = client.get(f"/api/rag/documents/{payload['documentId']}/file")
+
+    assert response.status_code == 404
 
 
 def test_document_list_excludes_other_schools_and_rejects_bad_status_filter(client, token_factory):

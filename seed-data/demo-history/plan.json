@@ -1,0 +1,216 @@
+{
+  "version": "demo-history-v2",
+  "note": "Declarative fixture for the demo stack. Expanded into dated rows by lib/demo-plan.js. Personas declare INTENT ONLY -- preferred subjects and how many chapters. The concrete chapters come from GET /api/rag/internal/chapters at seed time, so the demo studies whatever the school actually uploaded rather than a hardcoded NCERT list that goes stale the moment editions change. Day offsets are chosen so the streak, 7-day and 30-day windows all read as real computations rather than constants.",
+  "activeDayOffsets": [
+    0,
+    1,
+    2,
+    3,
+    4,
+    5,
+    6,
+    7,
+    8,
+    10,
+    11,
+    12,
+    13,
+    14,
+    15,
+    16,
+    18,
+    19,
+    20,
+    22,
+    24,
+    26,
+    28
+  ],
+  "streakNote": "0-6 are contiguous so the streak is >=7. Gaps at 9, 17, 21, 23, 25, 27 keep it honest.",
+  "personas": [
+    {
+      "email": "arjun@demo.com",
+      "name": "Arjun Sharma",
+      "grade": 8,
+      "newsCategories": [
+        "science",
+        "technology"
+      ],
+      "ratingBias": "high",
+      "scoreRange": [
+        62,
+        88
+      ],
+      "chapterIntent": {
+        "shared": 1,
+        "personal": 1,
+        "preferredSubjects": [
+          "Science",
+          "Mathematics"
+        ]
+      }
+    },
+    {
+      "email": "priya@demo.com",
+      "name": "Priya Singh",
+      "grade": 8,
+      "newsCategories": [
+        "health",
+        "science"
+      ],
+      "ratingBias": "high",
+      "scoreRange": [
+        70,
+        95
+      ],
+      "chapterIntent": {
+        "shared": 1,
+        "personal": 1,
+        "preferredSubjects": [
+          "Science",
+          "Social Science"
+        ]
+      }
+    },
+    {
+      "email": "rahul@demo.com",
+      "name": "Rahul Verma",
+      "grade": 8,
+      "newsCategories": [
+        "sports",
+        "technology"
+      ],
+      "ratingBias": "low",
+      "scoreRange": [
+        34,
+        58
+      ],
+      "chapterIntent": {
+        "shared": 1,
+        "personal": 1,
+        "preferredSubjects": [
+          "Mathematics",
+          "Science"
+        ]
+      }
+    }
+  ],
+  "chatScripts": {
+    "note": "FALLBACK ONLY. The AI seeder writes conversations from each chapter's own retrieved text (LLM-rendered, deterministic templating if no key). These exist so the OTHER seeders still derive the same turn COUNT without fetching chapter text -- the three jobs must agree on how many messages exist. `default` guarantees a non-empty script for any subject, because a missing key would make analytics emit fewer chat_message events than the AI seeder wrote messages.",
+    "bySubject": {
+      "Science": [
+        {
+          "question": "Why does plastic take so long to decompose?",
+          "answer": "Plastics are made of very long chains of repeating units called polymers. The bonds holding those chains together are strong, and most microorganisms in soil have no enzyme that can break them, so the chain stays intact for decades. That is also why we call plastics non-biodegradable."
+        },
+        {
+          "question": "What is the difference between thermoplastic and thermosetting plastic?",
+          "answer": "A thermoplastic softens when heated and can be reshaped again and again — polythene and PVC behave this way. A thermosetting plastic sets permanently the first time it is moulded and will not soften on reheating, like bakelite used in electrical switches."
+        },
+        {
+          "question": "Can you explain what a cell membrane does?",
+          "answer": "The cell membrane is the boundary of the cell. It is selectively permeable, which means it lets some substances in and keeps others out, so the cell can hold on to what it needs and remove what it does not."
+        },
+        {
+          "question": "Why is the nucleus called the control centre of the cell?",
+          "answer": "The nucleus holds the chromosomes, and chromosomes carry the instructions for making proteins. Because almost everything the cell does depends on those proteins, the structure that stores the instructions effectively directs the cell's activity."
+        },
+        {
+          "question": "What is rayon and why is it called artificial silk?",
+          "answer": "Rayon is made by chemically treating wood pulp, which is a natural material, so it is a semi-synthetic fibre. It is called artificial silk because it has a similar shine and softness to silk while being much cheaper to produce."
+        }
+      ],
+      "Mathematics": [
+        {
+          "question": "How do I find the square root of 1024 without a calculator?",
+          "answer": "Use prime factorisation. 1024 breaks into 2 multiplied by itself ten times. Pair the factors up — five pairs of 2 — and take one 2 from each pair. Multiplying those five 2s gives 32, so the square root of 1024 is 32."
+        },
+        {
+          "question": "Why is the square of an odd number always odd?",
+          "answer": "Write an odd number as 2n + 1. Squaring it gives 4n squared plus 4n plus 1, which is 4 times something, plus 1. Anything of that form leaves a remainder of 1 when divided by 2, so the result is always odd."
+        },
+        {
+          "question": "What is a perfect square?",
+          "answer": "A perfect square is a number you get by multiplying a whole number by itself. 1, 4, 9, 16 and 25 are perfect squares because they are 1x1, 2x2, 3x3, 4x4 and 5x5."
+        },
+        {
+          "question": "How many numbers lie between the squares of 12 and 13?",
+          "answer": "There is a useful shortcut: between the squares of n and n+1 there are 2n numbers. Here n is 12, so there are 24 numbers strictly between 144 and 169."
+        },
+        {
+          "question": "Is the square root of a number always smaller than the number?",
+          "answer": "Not always. It holds for numbers greater than 1, but for a number between 0 and 1 the square root is actually larger — the square root of 0.25 is 0.5."
+        }
+      ],
+      "Social Science": [
+        {
+          "question": "What does the judiciary actually do?",
+          "answer": "The judiciary interprets the law, settles disputes between citizens or between a citizen and the government, and checks whether a law passed by the legislature is consistent with the Constitution."
+        },
+        {
+          "question": "What is meant by independence of the judiciary?",
+          "answer": "It means the courts are not under the control of the legislature or the executive. Judges can rule against the government without fear of being removed for it, which is what allows the judiciary to act as a genuine check."
+        },
+        {
+          "question": "What is the difference between civil and criminal law?",
+          "answer": "Criminal law deals with conduct the state treats as an offence against society, and the state prosecutes. Civil law deals with disputes over rights between parties — property, contracts, marriage — and the affected party brings the case themselves."
+        }
+      ]
+    },
+    "default": [
+      {
+        "question": "Can you explain this part again?",
+        "answer": "Of course. Let's take it one step at a time and check what makes sense so far."
+      },
+      {
+        "question": "Why does that happen?",
+        "answer": "It comes down to the rule we just covered - once that holds, the rest follows from it."
+      },
+      {
+        "question": "Can you give me an example?",
+        "answer": "Sure. Try applying it to a simple case first, then we can build up to the harder one."
+      }
+    ]
+  },
+  "chapterBinding": {
+    "note": "Thresholds for calling an ingested chapter usable for the demo. A chapter thinner than this produces a session with nothing to say.",
+    "minChunkCount": 8,
+    "minEntityCount": 5,
+    "minQaAnchors": 3,
+    "maxChunks": 120
+  },
+  "qaTemplates": {
+    "definition": [
+      {
+        "question": "What does \"{title}\" actually mean in this chapter?",
+        "answer": "{summary}"
+      },
+      {
+        "question": "Can you define {title} again? I want to get the wording right.",
+        "answer": "{summary}"
+      }
+    ],
+    "question": [
+      {
+        "question": "{summary}",
+        "answer": "{chunkLead}"
+      }
+    ],
+    "activity": [
+      {
+        "question": "What am I supposed to observe in {title}?",
+        "answer": "{chunkLead}"
+      }
+    ]
+  },
+  "qaCitation": "That's from {book}, chapter {chapterNumber} - {chapterName}{pageClause}.",
+  "videoTopicTemplates": [
+    "{chapterName}",
+    "{chapterName} explained for class {grade}",
+    "{chapterName} {subject} revision"
+  ],
+  "diagramPromptTemplates": [
+    "labelled diagram for {chapterName}",
+    "concept map of {chapterName}"
+  ]
+}

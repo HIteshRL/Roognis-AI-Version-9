@@ -7,6 +7,10 @@ from database import SessionLocal
 from main import app
 from models import Document, DocumentStatus, RetrievalChunk
 
+# `/api/rag/internal/retrieve` is a service-to-service route: the AI service
+# calls it with the shared token, never a user JWT.
+INTERNAL_HEADERS = {"X-Internal-Service-Token": "test-internal-token"}
+
 
 def make_pdf(lines):
     document = fitz.open()
@@ -49,13 +53,13 @@ def upload_pdf(client, token_factory, *, school_id=None, subject="Science", grad
     return response.json()
 
 
-def test_retrieve_returns_ai_compatible_chunks_without_auth(client, token_factory):
+def test_retrieve_returns_ai_compatible_chunks_for_the_ai_service(client, token_factory):
     school_id = "22222222-2222-2222-2222-222222222222"
     upload_pdf(client, token_factory, school_id=school_id)
     client.cookies.clear()
 
     response = client.get(
-        "/api/rag/retrieve",
+        "/api/rag/internal/retrieve",
         params={
             "q": "Why do dentists use mirrors?",
             "schoolId": school_id,
@@ -64,6 +68,7 @@ def test_retrieve_returns_ai_compatible_chunks_without_auth(client, token_factor
             "chapterNumber": "10",
             "top": "3",
         },
+        headers=INTERNAL_HEADERS,
     )
 
     assert response.status_code == 200
@@ -82,8 +87,11 @@ def test_retrieve_returns_ai_compatible_chunks_without_auth(client, token_factor
             "metadata",
         }
         assert isinstance(chunk["chunkId"], str) and chunk["chunkId"]
-        assert isinstance(chunk["entityId"], str) and chunk["entityId"]
-        assert isinstance(chunk["canonicalConceptId"], str) and chunk["canonicalConceptId"]
+        # Passage chunks (whole paragraphs merged from the raw PDF, not tied to
+        # one regex-classified entity) legitimately carry no entityId/
+        # canonicalConceptId — only entity-derived chunks do.
+        assert chunk["entityId"] is None or isinstance(chunk["entityId"], str)
+        assert chunk["canonicalConceptId"] is None or isinstance(chunk["canonicalConceptId"], str)
         assert isinstance(chunk["text"], str) and chunk["text"]
         assert isinstance(chunk["source"], str) and chunk["source"]
         assert isinstance(chunk["score"], (int, float))
@@ -134,13 +142,14 @@ def test_retrieve_applies_school_and_subject_filters_before_scoring(client, toke
     )
 
     response = client.get(
-        "/api/rag/retrieve",
+        "/api/rag/internal/retrieve",
         params={
             "q": "dentist mirror",
             "schoolId": school_a,
             "subject": "Science",
             "top": "10",
         },
+        headers=INTERNAL_HEADERS,
     )
 
     chunks = response.json()["chunks"]
@@ -189,13 +198,14 @@ def test_retrieve_uses_vector_index_when_available(client, token_factory, monkey
     app.dependency_overrides[get_settings] = lambda: vector_settings
     try:
         response = client.get(
-            "/api/rag/retrieve",
+            "/api/rag/internal/retrieve",
             params={
                 "q": "dentist mirror",
                 "schoolId": school_id,
                 "subject": "Science",
                 "top": "1",
             },
+            headers=INTERNAL_HEADERS,
         )
     finally:
         app.dependency_overrides.pop(get_settings, None)
@@ -257,12 +267,13 @@ def test_retrieve_ignores_chunks_from_failed_documents(client, token_factory):
         db.commit()
 
     response = client.get(
-        "/api/rag/retrieve",
+        "/api/rag/internal/retrieve",
         params={
             "q": "dentist mirror",
             "schoolId": school_id,
             "subject": "Science",
         },
+        headers=INTERNAL_HEADERS,
     )
 
     assert response.status_code == 200
@@ -272,17 +283,47 @@ def test_retrieve_ignores_chunks_from_failed_documents(client, token_factory):
 def test_retrieve_returns_empty_chunks_for_missing_school_or_no_matches(client, token_factory):
     upload_pdf(client, token_factory)
 
-    missing_school = client.get("/api/rag/retrieve", params={"q": "dentist mirror"})
+    missing_school = client.get("/api/rag/internal/retrieve", params={"q": "dentist mirror"}, headers=INTERNAL_HEADERS)
     no_match = client.get(
-        "/api/rag/retrieve",
+        "/api/rag/internal/retrieve",
         params={
             "q": "photosynthesis stomata chlorophyll",
             "schoolId": "22222222-2222-2222-2222-222222222222",
             "subject": "Science",
         },
+        headers=INTERNAL_HEADERS,
     )
 
     assert missing_school.status_code == 200
     assert missing_school.json() == {"chunks": []}
     assert no_match.status_code == 200
     assert no_match.json() == {"chunks": []}
+
+
+def test_retrieve_requires_the_internal_service_token(client, token_factory):
+    """The endpoint used to be reachable by anyone who knew a school id.
+
+    It carried no authentication at all while every sibling route required a
+    JWT or the service token, and `schoolId` is a plain query parameter that is
+    the only tenancy filter — so an unauthenticated caller could read a whole
+    school's ingested textbook corpus. A student JWT must not open it either:
+    this is a service-to-service route, not a user-facing one.
+    """
+    school_id = "22222222-2222-2222-2222-222222222222"
+    upload_pdf(client, token_factory, school_id=school_id)
+    client.cookies.clear()
+
+    params = {"q": "dentist mirror", "schoolId": school_id, "subject": "Science"}
+
+    anonymous = client.get("/api/rag/internal/retrieve", params=params)
+    assert anonymous.status_code == 401
+
+    client.cookies.set("jwt", token_factory(role="student", schoolId=school_id))
+    as_student = client.get("/api/rag/internal/retrieve", params=params)
+    assert as_student.status_code == 401
+
+    client.cookies.clear()
+    with_token = client.get(
+        "/api/rag/internal/retrieve", params=params, headers=INTERNAL_HEADERS
+    )
+    assert with_token.status_code == 200

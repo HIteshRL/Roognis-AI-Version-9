@@ -32,6 +32,7 @@ model User {
   parentLinks  ParentStudent[] @relation("ParentLinks")
   studentLinks ParentStudent[] @relation("StudentLinks")
 
+  @@index([schoolId, role])
   @@map("users")
   @@schema("auth_db")
 }

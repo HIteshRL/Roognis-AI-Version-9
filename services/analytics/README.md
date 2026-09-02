@@ -82,9 +82,9 @@ Root `roognis/.env` must also define `DB_PASSWORD`, `JWT_SECRET`, and `INTERNAL_
 }
 ```
 
-`type` is stored as a free-form string so new event types do not require schema changes.
+`type` is validated against the service's versioned `KNOWN_EVENT_TYPES` allowlist before persistence. Add new event types to the contract and producer tests together.
 
-Known event types from AI Service today:
+Representative event types include:
 
 - `chat_message`
 - `feedback_submitted`

@@ -1,6 +1,8 @@
-const OPENROUTER_CHAT_COMPLETIONS_PATH = '/chat/completions';
+const CHAT_COMPLETIONS_PATH = '/chat/completions';
 const DEFAULT_OPENROUTER_BASE_URL = 'https://openrouter.ai/api/v1';
 const DEFAULT_OPENROUTER_QUIZ_MODEL = 'openai/gpt-5-mini';
+const DEFAULT_GROQ_BASE_URL = 'https://api.groq.com/openai/v1';
+const DEFAULT_GROQ_QUIZ_MODEL = 'openai/gpt-oss-120b';
 const DEFAULT_QUIZ_QUESTION_COUNT = 10;
 const DIFFICULTY_WEIGHTS = [
   ['simple', 0.5],
@@ -134,7 +136,8 @@ function normalizeQuestionCount(value) {
   return numeric;
 }
 
-function normalizeQuizDraftRequest(body = {}) {
+function normalizeQuizDraftRequest(body = {}, options = {}) {
+  const chunkLimit = Number(options.chunkLimit) > 0 ? Number(options.chunkLimit) : 40;
   const chapter = body.chapter || body.metadata || {};
   const chunks = Array.isArray(body.sourceChunks)
     ? body.sourceChunks
@@ -157,7 +160,7 @@ function normalizeQuizDraftRequest(body = {}) {
   const normalizedChunks = chunks
     .map((chunk, index) => normalizeSourceChunk(chunk, index))
     .filter(Boolean);
-  const sourceChunks = evenlySample(normalizedChunks, 40);
+  const sourceChunks = evenlySample(normalizedChunks, chunkLimit);
 
   if (sourceChunks.length < 2) {
     throw new Error('At least two chapter context chunks are required for quiz generation.');
@@ -230,69 +233,157 @@ function normalizeSourceChunk(chunk, index) {
   };
 }
 
-async function generateQuizDraft({ payload, config = {}, fetchFn = fetch }) {
-  const normalized = normalizeQuizDraftRequest(payload);
-  const apiKey = config.openrouterApiKey || process.env.OPENROUTER_API_KEY;
-  if (!apiKey) throw new Error('OPENROUTER_API_KEY is required for quiz generation.');
+/**
+ * Picks the LLM provider for quiz drafting. OpenRouter (an OpenAI-family model,
+ * given strict json_schema structured outputs) wins when configured; Groq is a
+ * fallback so quiz generation still works when only a Groq key is available, as
+ * is the case whenever OPENROUTER_API_KEY hasn't been funded yet. Groq's
+ * OpenAI-compatible models don't reliably support strict json_schema mode, so
+ * that branch uses json_object mode plus an explicit schema in the prompt, and
+ * leans on the existing validate-then-regenerate quality loop to catch drift.
+ */
+function resolveQuizProvider(config = {}) {
+  const openrouterApiKey = config.openrouterApiKey || process.env.OPENROUTER_API_KEY;
+  if (openrouterApiKey) {
+    const model = config.model || process.env.OPENROUTER_QUIZ_MODEL || DEFAULT_OPENROUTER_QUIZ_MODEL;
+    assertOpenRouterOpenAiModel(model);
+    return {
+      name: 'openrouter',
+      apiKey: openrouterApiKey,
+      model,
+      baseUrl: normalizeBaseUrl(config.baseUrl || process.env.OPENROUTER_API_BASE_URL || DEFAULT_OPENROUTER_BASE_URL),
+      extraHeaders: openRouterAttributionHeaders(config),
+      strictSchema: true,
+      chunkLimit: 40,
+      defaultQualityReview: true,
+      defaultQualityAttempts: 2,
+      buildRequestBody: (messages, { reasoningEffort, maxCompletionTokens }) => ({
+        model,
+        messages,
+        response_format: {
+          type: 'json_schema',
+          json_schema: {
+            name: 'chapter_quiz_draft',
+            description: 'A grounded, age-appropriate chapter quiz draft for teacher review.',
+            strict: true,
+            schema: quizDraftSchema,
+          },
+        },
+        provider: { require_parameters: true },
+        reasoning: { effort: reasoningEffort },
+        max_completion_tokens: maxCompletionTokens,
+      }),
+    };
+  }
 
-  const model = config.model || process.env.OPENROUTER_QUIZ_MODEL || DEFAULT_OPENROUTER_QUIZ_MODEL;
-  assertOpenRouterOpenAiModel(model);
+  const groqApiKey = config.groqApiKey || process.env.GROQ_API_KEY;
+  if (groqApiKey) {
+    const model = config.model || process.env.GROQ_QUIZ_MODEL || DEFAULT_GROQ_QUIZ_MODEL;
+    return {
+      name: 'groq',
+      apiKey: groqApiKey,
+      model,
+      baseUrl: normalizeBaseUrl(config.baseUrl || process.env.GROQ_API_BASE_URL || DEFAULT_GROQ_BASE_URL),
+      extraHeaders: {},
+      strictSchema: false,
+      // Groq's free/on-demand tier caps this class of model at 12,000 tokens
+      // per minute. A single quiz-draft call already uses ~8-9k of that budget,
+      // so a second call in the same 60s window (the quality-review pass, or a
+      // quality-gate retry) reliably blows the limit. Trade a smaller source
+      // sample and a single pass for actually completing on the free tier.
+      chunkLimit: 24,
+      defaultQualityReview: false,
+      defaultQualityAttempts: 1,
+      defaultMaxCompletionTokens: 2400,
+      buildRequestBody: (messages, { maxCompletionTokens }) => ({
+        model,
+        messages,
+        response_format: { type: 'json_object' },
+        max_tokens: maxCompletionTokens,
+        temperature: 0.4,
+        // See services/ai/structured-llm.js's buildGroq for why gpt-oss models
+        // need reasoning_effort capped — otherwise the hidden reasoning trace
+        // can consume the whole token budget and return empty content.
+        ...(model.startsWith('openai/gpt-oss') ? { reasoning_effort: 'low' } : {}),
+      }),
+    };
+  }
+
+  throw new Error('OPENROUTER_API_KEY or GROQ_API_KEY is required for quiz generation.');
+}
+
+function buildQuizJsonSchemaInstructions() {
+  return [
+    'Respond with a single JSON object only — no markdown, no code fences, no commentary before or after it.',
+    'The JSON object must conform exactly to this JSON Schema:',
+    JSON.stringify(quizDraftSchema),
+  ].join('\n');
+}
+
+function parseQuizDraftJson(text) {
+  const trimmed = String(text || '').trim();
+  const fenced = trimmed.match(/^```(?:json)?\s*([\s\S]*?)\s*```$/i);
+  return JSON.parse(fenced ? fenced[1] : trimmed);
+}
+
+async function generateQuizDraft({ payload, config = {}, fetchFn = fetch }) {
+  const provider = resolveQuizProvider(config);
+  const normalized = normalizeQuizDraftRequest(payload, { chunkLimit: provider.chunkLimit });
+
+  // Each provider reads its own env prefix so a Groq fallback never inherits
+  // OpenRouter's tuned-for-a-bigger-budget knobs (OPENROUTER_QUIZ_* is set in
+  // .env even when only GROQ_API_KEY is configured).
+  const envPrefix = provider.name === 'groq' ? 'GROQ' : 'OPENROUTER';
   const reasoningEffort = config.reasoningEffort || process.env.OPENROUTER_QUIZ_REASONING_EFFORT || 'medium';
-  const timeoutMs = Number(config.timeoutMs || process.env.OPENROUTER_QUIZ_TIMEOUT_MS || 60000);
-  const maxCompletionTokens = Number(config.maxCompletionTokens || process.env.OPENROUTER_QUIZ_MAX_COMPLETION_TOKENS || 4200);
-  const maxQualityAttempts = normalizeQualityAttempts(
-    config.maxQualityAttempts || process.env.OPENROUTER_QUIZ_QUALITY_ATTEMPTS || 2
+  const timeoutMs = Number(config.timeoutMs || process.env[`${envPrefix}_QUIZ_TIMEOUT_MS`] || 60000);
+  const maxCompletionTokens = Number(
+    config.maxCompletionTokens || process.env[`${envPrefix}_QUIZ_MAX_COMPLETION_TOKENS`] || provider.defaultMaxCompletionTokens || 4200
   );
-  const qualityReviewEnabled = config.qualityReview !== false
-    && String(process.env.OPENROUTER_QUIZ_QUALITY_REVIEW || 'true').toLowerCase() !== 'false';
-  const baseUrl = normalizeOpenRouterBaseUrl(config.baseUrl || process.env.OPENROUTER_API_BASE_URL || DEFAULT_OPENROUTER_BASE_URL);
+  const maxQualityAttempts = normalizeQualityAttempts(
+    config.maxQualityAttempts || process.env[`${envPrefix}_QUIZ_QUALITY_ATTEMPTS`] || provider.defaultQualityAttempts || 2
+  );
+  const qualityReviewEnvValue = process.env[`${envPrefix}_QUIZ_QUALITY_REVIEW`];
+  const qualityReviewEnabled = config.qualityReview !== undefined
+    ? config.qualityReview !== false
+    : qualityReviewEnvValue !== undefined
+      ? String(qualityReviewEnvValue).toLowerCase() !== 'false'
+      : provider.defaultQualityReview !== false;
   let rejectionReason = '';
 
   const requestCompletion = async messages => {
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), timeoutMs);
     try {
-      const response = await fetchFn(`${baseUrl}${OPENROUTER_CHAT_COMPLETIONS_PATH}`, {
+      const response = await fetchFn(`${provider.baseUrl}${CHAT_COMPLETIONS_PATH}`, {
         method: 'POST',
         headers: {
-          Authorization: `Bearer ${apiKey}`,
+          Authorization: `Bearer ${provider.apiKey}`,
           'Content-Type': 'application/json',
-          ...openRouterAttributionHeaders(config),
+          ...provider.extraHeaders,
         },
-        body: JSON.stringify({
-          model,
-          messages,
-          response_format: {
-            type: 'json_schema',
-            json_schema: {
-              name: 'chapter_quiz_draft',
-              description: 'A grounded, age-appropriate chapter quiz draft for teacher review.',
-              strict: true,
-              schema: quizDraftSchema,
-            },
-          },
-          provider: { require_parameters: true },
-          reasoning: { effort: reasoningEffort },
-          max_completion_tokens: maxCompletionTokens,
-        }),
+        body: JSON.stringify(provider.buildRequestBody(messages, { reasoningEffort, maxCompletionTokens })),
         signal: controller.signal,
       });
       if (!response.ok) {
         const errorBody = await response.text().catch(() => '');
-        throw new Error(`OpenRouter quiz generation failed with ${response.status}: ${errorBody}`);
+        throw new Error(`${provider.name} quiz generation failed with ${response.status}: ${errorBody}`);
       }
       const raw = await response.json();
       const text = extractResponseText(raw);
-      if (!text) throw new Error('OpenRouter quiz generation returned no output text.');
+      if (!text) throw new Error(`${provider.name} quiz generation returned no output text.`);
       return { raw, text };
     } finally {
       clearTimeout(timeout);
     }
   };
 
+  const systemPrompt = provider.strictSchema
+    ? buildQuizSystemPrompt()
+    : `${buildQuizSystemPrompt()}\n\n${buildQuizJsonSchemaInstructions()}`;
+
   for (let attempt = 1; attempt <= maxQualityAttempts; attempt += 1) {
     const messages = [
-      { role: 'system', content: buildQuizSystemPrompt() },
+      { role: 'system', content: systemPrompt },
       { role: 'user', content: buildQuizUserPrompt(normalized) },
     ];
     if (rejectionReason) {
@@ -310,7 +401,7 @@ async function generateQuizDraft({ payload, config = {}, fetchFn = fetch }) {
 
     const generated = await requestCompletion(messages);
     try {
-      const draft = repairQuizDraftCitations(JSON.parse(generated.text), normalized);
+      const draft = repairQuizDraftCitations(parseQuizDraftJson(generated.text), normalized);
       validateQuizDraft(draft, normalized);
 
       if (qualityReviewEnabled) {
@@ -319,11 +410,12 @@ async function generateQuizDraft({ payload, config = {}, fetchFn = fetch }) {
           { role: 'assistant', content: JSON.stringify(draft) },
           { role: 'user', content: buildQuizReviewPrompt() },
         ]);
-        const reviewedDraft = repairQuizDraftCitations(JSON.parse(review.text), normalized);
+        const reviewedDraft = repairQuizDraftCitations(parseQuizDraftJson(review.text), normalized);
         validateQuizDraft(reviewedDraft, normalized);
         return {
           draft: reviewedDraft,
-          model: review.raw.model || generated.raw.model || model,
+          model: review.raw.model || generated.raw.model || provider.model,
+          provider: provider.name,
           usage: review.raw.usage || generated.raw.usage || null,
           difficultyCounts: normalized.difficultyCounts,
           qualityAttempts: attempt,
@@ -333,7 +425,8 @@ async function generateQuizDraft({ payload, config = {}, fetchFn = fetch }) {
 
       return {
         draft,
-        model: generated.raw.model || model,
+        model: generated.raw.model || provider.model,
+        provider: provider.name,
         usage: generated.raw.usage || null,
         difficultyCounts: normalized.difficultyCounts,
         qualityAttempts: attempt,
@@ -378,7 +471,7 @@ function assertOpenRouterOpenAiModel(model) {
   }
 }
 
-function normalizeOpenRouterBaseUrl(value) {
+function normalizeBaseUrl(value) {
   return String(value || DEFAULT_OPENROUTER_BASE_URL).trim().replace(/\/+$/, '');
 }
 
@@ -672,6 +765,7 @@ module.exports = {
   evenlySample,
   normalizeQuizDraftRequest,
   generateQuizDraft,
+  resolveQuizProvider,
   assertOpenRouterOpenAiModel,
   buildQuizSystemPrompt,
   buildQuizUserPrompt,

@@ -1,0 +1,182 @@
+# Demo environment.
+#
+# Layers over docker-compose.yml and repoints the WHOLE stack at a separate
+# database, `roognis_demo`. Nothing here changes application code or read
+# paths — the demo exercises byte-identical code against isolated data, so a
+# populated dashboard is evidence the product works rather than evidence the
+# seeder works.
+#
+# Run it with its own project name so containers and volumes never collide
+# with a real stack:
+#
+#   docker compose -p roognis-demo \
+#     -f docker-compose.yml -f docker-compose.demo.yml up -d --build
+#
+# Tear it down, database and all:
+#
+#   docker compose -p roognis-demo \
+#     -f docker-compose.yml -f docker-compose.demo.yml down -v
+#
+# `-p` is what isolates the postgres volume; without it this reuses the
+# default project's volume and the "separate database" guarantee is lost.
+
+services:
+  # Published on 8080 so a demo stack can run beside a real one on :80.
+  # `!override` is required: compose *appends* to a ports list by default, so a
+  # plain override would keep binding :80 as well and collide.
+  traefik:
+    ports: !override
+      - "${DEMO_HTTP_PORT:-8080}:80"
+
+  postgres:
+    environment:
+      POSTGRES_DB: roognis_demo
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d roognis_demo"]
+
+  auth:
+    environment:
+      DATABASE_URL: "postgresql://postgres:${DB_PASSWORD}@postgres:5432/roognis_demo?schema=auth_db"
+      # Demo users are the point of this stack, so unlike production these are on.
+      SEED_DEMO_USERS: "true"
+      DEMO_SCHOOL_ID: ${DEMO_SCHOOL_ID:?Set DEMO_SCHOOL_ID to seed the demo environment}
+
+  ai:
+    environment:
+      DATABASE_URL: "postgresql://postgres:${DB_PASSWORD}@postgres:5432/roognis_demo?schema=ai_db"
+
+  quiz:
+    environment:
+      DATABASE_URL: "postgresql://postgres:${DB_PASSWORD}@postgres:5432/roognis_demo?schema=quiz_db"
+
+  practice:
+    environment:
+      DATABASE_URL: "postgresql://postgres:${DB_PASSWORD}@postgres:5432/roognis_demo?schema=practice_db"
+
+  psv:
+    environment:
+      DATABASE_URL: "postgresql://postgres:${DB_PASSWORD}@postgres:5432/roognis_demo"
+
+  analytics:
+    environment:
+      DATABASE_URL: "postgresql://postgres:${DB_PASSWORD}@postgres:5432/roognis_demo?schema=analytics_db"
+
+  rag:
+    environment:
+      DATABASE_URL: "postgresql://postgres:${DB_PASSWORD}@postgres:5432/roognis_demo"
+      DEMO_SCHOOL_ID: ${DEMO_SCHOOL_ID:?Set DEMO_SCHOOL_ID to seed the demo environment}
+
+  textbook-seed:
+    environment:
+      DATABASE_URL: "postgresql://postgres:${DB_PASSWORD}@postgres:5432/roognis_demo"
+
+  lms:
+    environment:
+      DATABASE_URL: "postgresql://postgres:${DB_PASSWORD}@postgres:5432/roognis_demo"
+
+  # ── Demo history seeders ────────────────────────────────────────────────────
+  # Three one-shot jobs, one per owning schema, following the textbook-seed
+  # pattern. They never write outside their own service's schema; they agree on
+  # ids by deriving them from the same fixture in ./seed-data.
+  #
+  # Order matters: analytics runs last because every event it writes describes a
+  # row the other two already created.
+
+  demo-history-ai:
+    build: ./services/ai
+    command: ["node", "scripts/seed-demo-history.js"]
+    environment:
+      DATABASE_URL: "postgresql://postgres:${DB_PASSWORD}@postgres:5432/roognis_demo?schema=ai_db"
+      AUTH_SERVICE_URL: "http://auth:3001"
+      # The seeder reads the live corpus to decide which chapters the demo
+      # students studied, and pulls each chapter's text to derive their
+      # questions. Without these it cannot bind to anything and skips.
+      RAG_SERVICE_URL: "http://rag:3003"
+      INTERNAL_SERVICE_TOKEN: ${INTERNAL_SERVICE_TOKEN}
+      # The seeded conversations are written by the LLM from each chapter's own
+      # retrieved text — a rendering step, not a teaching decision. Optional:
+      # with no key the seeder falls back to deterministic templating, which is
+      # still grounded but reads noticeably flatter.
+      LLM_PROVIDER: ${LLM_PROVIDER:-}
+      OPENROUTER_API_KEY: ${OPENROUTER_API_KEY:-}
+      GROQ_API_KEY: ${GROQ_API_KEY:-}
+      DEMO_QA_MODEL: ${DEMO_QA_MODEL:-}
+      SEED_DEMO_HISTORY: "true"
+      DEMO_SCHOOL_ID: ${DEMO_SCHOOL_ID:?Set DEMO_SCHOOL_ID to seed the demo environment}
+      NODE_ENV: production
+    volumes:
+      - ./seed-data:/app/seed-data:ro
+    depends_on:
+      postgres:
+        condition: service_healthy
+      auth:
+        condition: service_healthy
+      ai:
+        condition: service_healthy
+      rag:
+        condition: service_healthy
+      # Chapters must be ingested before there is anything to bind history to.
+      # Note this makes the demo seed all-or-nothing: textbook-seed exits 1 if
+      # any single chapter fails.
+      textbook-seed:
+        condition: service_completed_successfully
+    restart: "no"
+
+  demo-history-quiz:
+    build: ./services/quiz
+    command: ["node", "scripts/seed-demo-history.js"]
+    environment:
+      DATABASE_URL: "postgresql://postgres:${DB_PASSWORD}@postgres:5432/roognis_demo?schema=quiz_db"
+      AUTH_SERVICE_URL: "http://auth:3001"
+      QUIZ_SELF_URL: "http://quiz:3005"
+      RAG_SERVICE_URL: "http://rag:3003"
+      INTERNAL_SERVICE_TOKEN: ${INTERNAL_SERVICE_TOKEN}
+      SEED_DEMO_HISTORY: "true"
+      DEMO_SCHOOL_ID: ${DEMO_SCHOOL_ID:?Set DEMO_SCHOOL_ID to seed the demo environment}
+      NODE_ENV: production
+    volumes:
+      - ./seed-data:/app/seed-data:ro
+    depends_on:
+      postgres:
+        condition: service_healthy
+      auth:
+        condition: service_healthy
+      quiz:
+        condition: service_healthy
+      rag:
+        condition: service_healthy
+      # Chapters must exist before there is any quiz to approve and attempt.
+      textbook-seed:
+        condition: service_completed_successfully
+    restart: "no"
+
+  demo-history-analytics:
+    build: ./services/analytics
+    command: ["node", "scripts/seed-demo-history.js"]
+    environment:
+      DATABASE_URL: "postgresql://postgres:${DB_PASSWORD}@postgres:5432/roognis_demo?schema=analytics_db"
+      AUTH_SERVICE_URL: "http://auth:3001"
+      QUIZ_SERVICE_URL: "http://quiz:3005"
+      RAG_SERVICE_URL: "http://rag:3003"
+      INTERNAL_SERVICE_TOKEN: ${INTERNAL_SERVICE_TOKEN}
+      SEED_DEMO_HISTORY: "true"
+      DEMO_SCHOOL_ID: ${DEMO_SCHOOL_ID:?Set DEMO_SCHOOL_ID to seed the demo environment}
+      NODE_ENV: production
+    volumes:
+      - ./seed-data:/app/seed-data:ro
+    depends_on:
+      postgres:
+        condition: service_healthy
+      analytics:
+        condition: service_healthy
+      rag:
+        condition: service_healthy
+      # It logs in as the teacher and all three students; auth was never
+      # declared here, it just happened to be up by this point in the graph.
+      auth:
+        condition: service_healthy
+      demo-history-ai:
+        condition: service_completed_successfully
+      demo-history-quiz:
+        condition: service_completed_successfully
+    restart: "no"

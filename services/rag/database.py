@@ -28,6 +28,17 @@ if settings.sqlalchemy_database_url.startswith("sqlite"):
             "poolclass": StaticPool,
         }
     )
+else:
+    # Explicit rather than the library default (pool_size=5, max_overflow=10):
+    # 8 services already share one Postgres instance with a stock
+    # max_connections=100 and no PgBouncer in front of it. StaticPool (above,
+    # used for SQLite in tests) doesn't accept these kwargs, hence the branch.
+    engine_options.update(
+        {
+            "pool_size": settings.db_pool_size,
+            "max_overflow": settings.db_max_overflow,
+        }
+    )
 
 engine = create_engine(settings.sqlalchemy_database_url, **engine_options)
 

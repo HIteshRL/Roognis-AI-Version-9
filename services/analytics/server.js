@@ -42,6 +42,20 @@ if (require.main === module) {
 
   process.on('SIGINT', () => shutdown('SIGINT'));
   process.on('SIGTERM', () => shutdown('SIGTERM'));
+
+  // A stray throw outside the request path would otherwise crash the
+  // process silently under Node's default behavior, taking down every
+  // concurrently in-flight request with it — worst at peak load. Log with
+  // full context and exit so the container's `restart: unless-stopped`
+  // policy brings it back.
+  process.on('uncaughtException', err => {
+    console.error('[analytics] uncaughtException:', err);
+    process.exit(1);
+  });
+  process.on('unhandledRejection', reason => {
+    console.error('[analytics] unhandledRejection:', reason);
+    process.exit(1);
+  });
 }
 
 module.exports = app;

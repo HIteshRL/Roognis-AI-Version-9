@@ -362,6 +362,8 @@ router.get('/teacher/interventions', ...teacherOnly, async (req, res) => {
         sessionId: true,
         metadata: true,
       },
+      orderBy: { createdAt: 'desc' },
+      take: 500,
     });
 
     const eventsByStudent = groupEventsByStudent(events);
@@ -432,6 +434,8 @@ router.get('/queries/trends', ...teacherOnly, async (req, res) => {
         sessionId: true,
         metadata: true,
       },
+      orderBy: { createdAt: 'desc' },
+      take: 500,
     });
 
     return res.status(200).json({

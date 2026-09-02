@@ -1,15 +1,18 @@
 from __future__ import annotations
 
 import hashlib
+import logging
 import re
 from collections.abc import Sequence
 from dataclasses import dataclass
+from pathlib import Path
 from urllib.parse import urlparse
 
 from sqlalchemy import delete, select
 from sqlalchemy.orm import Session
 
 from config import Settings
+from eke_pipeline import parse_pdf_blocks
 from models import (
     Document,
     DocumentIngestionJob,
@@ -19,6 +22,18 @@ from models import (
     IngestionJobStatus,
     RetrievalChunk,
 )
+
+logger = logging.getLogger(__name__)
+
+# Passage chunks anchor to real reading order, not an EducationalEntity, so
+# their pedagogical_order lives in its own numeric band, well above every
+# entity-derived order (base_order tops out at 95 * 1000 = 95000).
+PASSAGE_ORDER_BASE = 600_000
+MIN_PASSAGE_CHARS = 120
+MAX_PASSAGE_CHARS = 1100
+# A generous ceiling for the rare oversized single block — keeps a chunk
+# usable without silently truncating a normal paragraph mid-sentence.
+PASSAGE_HARD_CAP_CHARS = 2400
 
 
 @dataclass(frozen=True)
@@ -99,11 +114,30 @@ def generate_chunks_and_embeddings(
         .order_by(EducationalEntity.created_at.asc(), EducationalEntity.id.asc())
     ).all()
 
-    chunks = [
+    entity_chunks = [
         create_chunk(db, document, entity, index)
         for index, entity in enumerate(entities, start=1)
         if chunk_text_for_entity(entity)
     ]
+
+    # Entity chunks are regex-classified sentence fragments (title/summary/content
+    # of one EducationalEntity) — useful for structured facts, but too short to
+    # ground a tutor answer in real textbook prose. Passage chunks are built
+    # straight from the PDF's own paragraph blocks so retrieval has something a
+    # student-facing citation can actually quote.
+    passage_chunks = []
+    try:
+        passages = build_passage_chunks(document)
+    except Exception as exc:
+        logger.warning("Passage chunking failed for document %s: %s", document.id, exc)
+        passages = []
+    start_index = len(entity_chunks) + 1
+    passage_chunks = [
+        create_passage_chunk(db, document, passage, start_index + offset)
+        for offset, passage in enumerate(passages)
+    ]
+
+    chunks = entity_chunks + passage_chunks
     job.chunks_created = len(chunks)
     db.flush()
 
@@ -160,6 +194,133 @@ def generate_chunks_and_embeddings(
         chunks_embedded=chunks_embedded,
         collection_name=collection_name,
     )
+
+
+def truncate_at_boundary(text: str, limit: int) -> str:
+    """Truncate to at most `limit` chars at a sentence or word boundary
+    rather than an arbitrary character offset, so a long passage doesn't get
+    cut mid-word or mid-sentence."""
+    if len(text) <= limit:
+        return text
+    window = text[:limit]
+    sentence_end = max(window.rfind(". "), window.rfind("! "), window.rfind("? "))
+    if sentence_end > limit * 0.5:
+        return window[: sentence_end + 1].rstrip()
+    word_boundary = window.rfind(" ")
+    if word_boundary > limit * 0.5:
+        return window[:word_boundary].rstrip() + "..."
+    return window.rstrip() + "..."
+
+
+def build_passage_chunks(document: Document) -> list[dict]:
+    """Merge the PDF's raw paragraph blocks into passage-sized chunks.
+
+    Headings flush the current passage and get prefixed onto whatever follows,
+    so each chunk stays self-contained (a citation reading "1.2 Photosynthesis /
+    Plants make food using sunlight..." rather than a bare, context-free line).
+    """
+    blocks, _pages_parsed = parse_pdf_blocks(Path(document.file_path or ""))
+
+    passages: list[dict] = []
+    current_texts: list[str] = []
+    current_heading: str | None = None
+    current_page_start: int | None = None
+    current_page_end: int | None = None
+    current_order_start: int | None = None
+
+    def flush() -> None:
+        nonlocal current_texts, current_page_start, current_page_end, current_order_start
+        if current_texts:
+            body = "\n\n".join(current_texts).strip()
+            if len(body) >= MIN_PASSAGE_CHARS:
+                text = f"{current_heading}\n{body}" if current_heading else body
+                passages.append({
+                    "text": truncate_at_boundary(text, PASSAGE_HARD_CAP_CHARS),
+                    "page_start": current_page_start,
+                    "page_end": current_page_end,
+                    "order": current_order_start,
+                })
+        current_texts = []
+        current_page_start = None
+        current_page_end = None
+        current_order_start = None
+
+    for block in blocks:
+        if block.is_heading:
+            flush()
+            current_heading = block.text
+            continue
+        if not block.text:
+            continue
+
+        prospective_len = sum(len(part) for part in current_texts) + len(block.text)
+        if current_texts and prospective_len > MAX_PASSAGE_CHARS:
+            flush()
+        if current_page_start is None:
+            current_page_start = block.page
+            current_order_start = block.order
+        current_page_end = block.page
+        current_texts.append(block.text)
+
+    flush()
+    return passages
+
+
+def passage_chunk_metadata(document: Document, passage: dict) -> dict:
+    return {
+        "schoolId": document.school_id,
+        "board": document.board,
+        "curriculum": document.curriculum,
+        "grade": document.grade,
+        "subject": document.subject,
+        "book": document.book,
+        "chapterNumber": document.chapter_number,
+        "chapterName": document.chapter_name,
+        "language": document.language,
+        "edition": document.edition,
+        "documentId": document.id,
+        "entityId": None,
+        "canonicalConceptId": None,
+        "entityType": "Passage",
+        "chunkType": "passage",
+        "pageStart": passage.get("page_start"),
+        "pageEnd": passage.get("page_end"),
+    }
+
+
+def create_passage_chunk(
+    db: Session,
+    document: Document,
+    passage: dict,
+    chunk_index: int,
+) -> RetrievalChunk:
+    metadata = passage_chunk_metadata(document, passage)
+    text = passage["text"]
+    chunk = RetrievalChunk(
+        document_id=document.id,
+        entity_id=None,
+        canonical_concept_id=None,
+        school_id=document.school_id,
+        board=document.board,
+        curriculum=document.curriculum,
+        subject=document.subject,
+        grade=document.grade,
+        chapter_number=document.chapter_number,
+        chapter_name=document.chapter_name,
+        chunk_index=chunk_index,
+        chunk_type="passage",
+        text=text,
+        source=source_for_chunk(document, metadata),
+        source_page=metadata.get("pageStart"),
+        page_start=metadata.get("pageStart"),
+        page_end=metadata.get("pageEnd"),
+        pedagogical_order=PASSAGE_ORDER_BASE + int(passage.get("order") or 0),
+        token_count=estimate_token_count(text),
+        metadata_json=metadata,
+    )
+    db.add(chunk)
+    db.flush()
+    return chunk
 
 
 def create_chunk(

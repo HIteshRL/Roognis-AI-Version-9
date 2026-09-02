@@ -13,15 +13,27 @@ const LEARNING_EVENT_TYPES = new Set([
   'chat_message',
   'feedback_submitted',
   'image_generated',
+  'visual_generated',
+  'practice_generated',
+  'practice_completed',
+  'academic_card_generated',
+  'academic_card_attempted',
   'video_recommended',
   'video_opened',
-  'video_completed',
   'study_time_tracked',
   'lesson_started',
-  'lesson_completed',
   'quiz_opened',
   'quiz_submitted',
   'quiz_graded',
+  // Discover reading-time signals (Workstream 2) — durationSeconds in their
+  // metadata rolls into timeSpentSecondsThisWeek via eventActiveSeconds()'s
+  // existing generic metadata-key sum, with no further code change needed.
+  'discover_article_dwell',
+  'discover_headline_dwell',
+  // Video recommendations — same durationSeconds-key auto-sum, no new logic.
+  // discover_video_opened is intentionally NOT here, same as
+  // discover_article_opened above it: it carries no duration.
+  'discover_video_dwell',
 ]);
 
 function daysAgo(n) {
@@ -321,9 +333,10 @@ function buildLessonEngagement(events) {
   const counts = buildUsageSummary(events).byType;
   return [
     { key: 'tutor_chat', label: 'Tutor chat', count: counts.chat_message || 0 },
-    { key: 'diagrams', label: 'Diagrams', count: counts.image_generated || 0 },
-    { key: 'videos', label: 'Videos', count: (counts.video_recommended || 0) + (counts.video_opened || 0) + (counts.video_completed || 0) },
+    { key: 'diagrams', label: 'Diagrams', count: (counts.image_generated || 0) + (counts.visual_generated || 0) },
+    { key: 'videos', label: 'Videos', count: (counts.video_recommended || 0) + (counts.video_opened || 0) },
     { key: 'practice_quiz', label: 'Practice quiz', count: (counts.quiz_opened || 0) + (counts.quiz_submitted || 0) + (counts.quiz_graded || 0) },
+    { key: 'discover', label: 'Discover reading', count: counts.discover_article_opened || 0 },
   ];
 }
 
@@ -340,7 +353,6 @@ function buildCourseProgress(events) {
         diagramCount: 0,
         videoCount: 0,
         quizCount: 0,
-        lessonCompletedCount: 0,
         lastActiveAt: null,
         progressPercent: 0,
         nextAction: 'Ask the tutor a lesson question',
@@ -350,10 +362,9 @@ function buildCourseProgress(events) {
     const entry = bySubject[subject];
     entry.activityCount += 1;
     if (event.type === 'chat_message') entry.chatCount += 1;
-    if (event.type === 'image_generated') entry.diagramCount += 1;
-    if (event.type === 'video_recommended' || event.type === 'video_opened' || event.type === 'video_completed') entry.videoCount += 1;
+    if (event.type === 'image_generated' || event.type === 'visual_generated') entry.diagramCount += 1;
+    if (event.type === 'video_recommended' || event.type === 'video_opened') entry.videoCount += 1;
     if (event.type === 'quiz_opened' || event.type === 'quiz_submitted' || event.type === 'quiz_graded') entry.quizCount += 1;
-    if (event.type === 'lesson_completed') entry.lessonCompletedCount += 1;
 
     const createdAt = eventDate(event);
     if (!entry.lastActiveAt || createdAt > entry.lastActiveAt) entry.lastActiveAt = createdAt;
@@ -366,7 +377,6 @@ function buildCourseProgress(events) {
         + Math.min(entry.diagramCount, 3) * 8
         + Math.min(entry.videoCount, 4) * 8
         + Math.min(entry.quizCount, 4) * 10
-        + Math.min(entry.lessonCompletedCount, 3) * 12
       );
       const nextAction = entry.quizCount > 0
         ? 'Review quiz mistakes'
@@ -417,7 +427,9 @@ function buildStudentDashboard(events, options = {}) {
   const now = options.now || new Date();
   const recentEvents = events.filter(event => isWithinDays(event, 7, now));
   const courseProgress = buildCourseProgress(events);
-  const completedThisWeek = recentEvents.filter(event => event.type === 'lesson_completed' || event.type === 'quiz_submitted').length;
+  // Submitted practice only. There is no lesson-completion state anywhere in
+  // the product, so there is nothing else honest to count here.
+  const completedThisWeek = recentEvents.filter(event => event.type === 'quiz_submitted').length;
   const averageProgress = courseProgress.length
     ? Math.round(courseProgress.reduce((sum, item) => sum + item.progressPercent, 0) / courseProgress.length)
     : 0;

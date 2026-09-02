@@ -16,12 +16,12 @@ The graph/entity layer is the source of truth. Vector chunks are generated index
 - Return chunks with at least `text`, `source`, and optional `score`.
 - New responses may include richer fields such as `chunkId`, `entityId`, `metadata`, and `pedagogicalOrder`.
 - Teacher ingestion APIs require a teacher JWT cookie.
-- `/api/rag/retrieve` remains callable by the AI service without a JWT, using explicit `schoolId` and metadata filters.
+- `/api/rag/internal/retrieve` is callable by the AI service using explicit `schoolId` and metadata filters. It takes the **shared internal service token**, not a user JWT. It was previously unauthenticated and reachable through Traefik, which let anyone who knew a school id read that school's entire ingested corpus; it moved under `/internal/` so the posture is legible from the path.
 - Prefer the existing service stub names:
   - `POST /api/rag/upload`
   - `GET /api/rag/upload/:docId/status`
   - `GET /api/rag/documents`
-  - `GET /api/rag/retrieve`
+  - `GET /api/rag/internal/retrieve`
 - Older docs may mention `POST /api/rag/documents`; if kept, it should be an alias for `POST /api/rag/upload`, not a second workflow.
 
 ## Document Lifecycle
@@ -283,6 +283,26 @@ Chunk generation rules:
 - Figures and diagrams should produce one chunk that includes caption, nearby explanation, page, and linked concept.
 - Chunks must carry enough metadata to support pre-retrieval filtering.
 
+### `chunkType: "passage"`
+
+Entity-derived chunks above are built from regex-classified `EducationalEntity`
+fragments (a title, a summary sentence, a definition) — useful for structured
+facts, but often too short to ground a tutor answer in real textbook prose.
+`passage` chunks exist alongside them (not instead of), built directly from the
+PDF's own paragraph blocks (`eke_pipeline.parse_pdf_blocks`), merged up to
+~1,100 characters and never crossing a heading boundary. A heading encountered
+while merging is prefixed onto whatever text follows, so a passage stays
+self-contained as a citation (e.g. `"10.2 Uses of Concave Mirrors\nDentists use
+concave mirrors..."`).
+
+Passage chunks have **`entityId: null` and `canonicalConceptId: null`** — they
+are not tied to one classified entity — and `metadata.entityType: "Passage"`.
+Any consumer of `/api/rag/internal/retrieve` that assumed `entityId` is always
+a non-null string must treat it as nullable. `pedagogicalOrder` for passage
+chunks lives in its own numeric band (≥ 600000) so it never collides with
+entity-derived ordering, and sorts after it as a tie-break only — retrieval
+ranking is driven by lexical/vector score, not this field.
+
 ## API Contract
 
 ### `POST /api/rag/upload`
@@ -393,7 +413,7 @@ Response:
 
 Caller: AI service
 
-Auth: none for internal service compatibility
+Auth: `X-Internal-Service-Token` for service-to-service access; never expose this route without internal authentication.
 
 Query:
 

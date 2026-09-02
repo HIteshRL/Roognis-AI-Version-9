@@ -1,34 +1,20 @@
+const { extractTopics, extractEntities } = require('./interest-graph');
+
+// Ten genres so the feed can be browsed the way a real news app is browsed.
+// `category` is the genre key the whole interest graph is indexed on — keep it
+// lowercase and in sync with GENRES in interest-graph.js.
 const DEFAULT_NEWS_FEEDS = Object.freeze([
-  {
-    key: 'bbc-technology',
-    name: 'BBC News',
-    category: 'Technology',
-    url: 'https://feeds.bbci.co.uk/news/technology/rss.xml',
-  },
-  {
-    key: 'bbc-science',
-    name: 'BBC News',
-    category: 'Science',
-    url: 'https://feeds.bbci.co.uk/news/science_and_environment/rss.xml',
-  },
-  {
-    key: 'bbc-sport',
-    name: 'BBC Sport',
-    category: 'Sports',
-    url: 'https://feeds.bbci.co.uk/sport/rss.xml',
-  },
-  {
-    key: 'bbc-world',
-    name: 'BBC News',
-    category: 'World Affairs',
-    url: 'https://feeds.bbci.co.uk/news/world/rss.xml',
-  },
-  {
-    key: 'un-world',
-    name: 'UN News',
-    category: 'World Affairs',
-    url: 'https://news.un.org/feed/subscribe/en/news/all/rss.xml',
-  },
+  { key: 'bbc-top',           name: 'BBC News',  category: 'top',           url: 'https://feeds.bbci.co.uk/news/rss.xml' },
+  { key: 'bbc-india',         name: 'BBC News',  category: 'india',         url: 'https://feeds.bbci.co.uk/news/world/asia/india/rss.xml' },
+  { key: 'bbc-business',      name: 'BBC News',  category: 'business',      url: 'https://feeds.bbci.co.uk/news/business/rss.xml' },
+  { key: 'bbc-technology',    name: 'BBC News',  category: 'technology',    url: 'https://feeds.bbci.co.uk/news/technology/rss.xml' },
+  { key: 'bbc-science',       name: 'BBC News',  category: 'science',       url: 'https://feeds.bbci.co.uk/news/science_and_environment/rss.xml' },
+  { key: 'bbc-health',        name: 'BBC News',  category: 'health',        url: 'https://feeds.bbci.co.uk/news/health/rss.xml' },
+  // The UN News feed this replaced 404s at every published path.
+  { key: 'bbc-education',     name: 'BBC News',  category: 'education',     url: 'https://feeds.bbci.co.uk/news/education/rss.xml' },
+  { key: 'bbc-sport',         name: 'BBC Sport', category: 'sports',        url: 'https://feeds.bbci.co.uk/sport/rss.xml' },
+  { key: 'bbc-entertainment', name: 'BBC News',  category: 'entertainment', url: 'https://feeds.bbci.co.uk/news/entertainment_and_arts/rss.xml' },
+  { key: 'bbc-world',         name: 'BBC News',  category: 'world',         url: 'https://feeds.bbci.co.uk/news/world/rss.xml' },
 ]);
 
 const BLOCKED_NEWS_TERMS = Object.freeze([
@@ -94,20 +80,33 @@ function normalizeRssItem(item, feed) {
   };
 }
 
+// General-news genres carry the highest chance of distressing material, so
+// they must earn inclusion by showing constructive/educational framing rather
+// than merely avoiding blocked terms.
+const GATED_GENERAL_GENRES = new Set(['world', 'india', 'top']);
+const GATED_SCIENCE_GENRES = new Set(['science', 'environment', 'health']);
+const OPEN_GENRES = new Set(['sports', 'entertainment', 'education', 'business', 'achievements']);
+
 function isStudentSafeNews(candidate) {
   const combined = ` ${candidate?.title || ''} ${candidate?.summary || ''} `.toLowerCase();
   if (!combined.trim()) return false;
   if (BLOCKED_NEWS_TERMS.some(term => includesNewsTerm(combined, term))) return false;
-  if (candidate.category === 'World Affairs') {
+
+  // Genre keys are lowercase. This used to compare against Title Case names and
+  // ended in a whitelist — after the genre rename that whitelist would have
+  // rejected every article and emptied the feed.
+  const genre = String(candidate?.category || '').toLowerCase();
+
+  if (GATED_GENERAL_GENRES.has(genre)) {
     return WORLD_AFFAIRS_EDUCATIONAL_TERMS.some(term => includesNewsTerm(combined, term));
   }
-  if (candidate.category === 'Technology') {
+  if (genre === 'technology') {
     return TECHNOLOGY_EDUCATIONAL_TERMS.some(term => includesNewsTerm(combined, term));
   }
-  if (['Science', 'Environment'].includes(candidate.category)) {
+  if (GATED_SCIENCE_GENRES.has(genre)) {
     return SCIENCE_POSITIVE_TERMS.some(term => includesNewsTerm(combined, term));
   }
-  return ['Technology', 'Science', 'Sports', 'Environment', 'Achievements'].includes(candidate.category);
+  return OPEN_GENRES.has(genre);
 }
 
 function includesNewsTerm(text, term) {
@@ -188,7 +187,8 @@ function titleBigrams(tokens) {
 }
 
 function balanceNewsCategories(articles, limit = 15) {
-  const preferredOrder = ['Technology', 'Science', 'World Affairs', 'Sports', 'Environment', 'Achievements'];
+  const preferredOrder = ['top', 'india', 'education', 'science', 'technology',
+                          'business', 'health', 'world', 'sports', 'entertainment'];
   const buckets = new Map();
   articles.forEach(article => {
     const category = article.category || 'Other';
@@ -202,21 +202,31 @@ function balanceNewsCategories(articles, limit = 15) {
   const selected = [];
   let round = 0;
   while (selected.length < limit) {
-    let added = false;
-    for (const category of categories) {
-      const article = buckets.get(category)?.[round];
-      if (!article) continue;
+    // Take one article per category, but order each round by recency. Ranking
+    // strictly by `preferredOrder` let a slow feed lead: BBC Technology can go
+    // a day without publishing, so its top story was fronting the carousel
+    // while two-hour-old stories sat behind it. Category balance is a property
+    // of the selection, not of the order it is read in.
+    const roundArticles = categories
+      .map(category => buckets.get(category)?.[round])
+      .filter(Boolean)
+      .sort((a, b) => b.publishedAt - a.publishedAt);
+    if (!roundArticles.length) break;
+    for (const article of roundArticles) {
       selected.push(article);
-      added = true;
       if (selected.length >= limit) break;
     }
-    if (!added) break;
     round += 1;
   }
   return selected;
 }
 
-async function refreshStudentNews({ prisma, fetchImpl = fetch, feeds = DEFAULT_NEWS_FEEDS, now = new Date() }) {
+// selectionLimit: ten genres need a far bigger retained pool than the old five
+// did, otherwise personalised ranking has almost nothing to choose between.
+async function refreshStudentNews({
+  prisma, fetchImpl = fetch, feeds = DEFAULT_NEWS_FEEDS,
+  now = new Date(), selectionLimit = 220,
+}) {
   const settled = await Promise.allSettled(feeds.map(async feed => {
     const response = await fetchImpl(feed.url, {
       headers: {
@@ -240,13 +250,19 @@ async function refreshStudentNews({ prisma, fetchImpl = fetch, feeds = DEFAULT_N
     else errors.push(`${feeds[index].name}: ${result.reason?.message || 'feed unavailable'}`);
   });
 
-  const selected = selectStudentNews(candidates, { now });
+  const selected = selectStudentNews(candidates, { now, limit: selectionLimit });
   const expiresAt = new Date(now.getTime() + 10 * 24 * 60 * 60 * 1000);
   for (const article of selected) {
+    // Extract facets once, here. Ranking runs on every feed request and must
+    // never re-parse article text.
+    const topics = extractTopics(article).map(topic => topic.key);
+    const entities = extractEntities(article).map(entity => entity.key);
     await prisma.studentNewsArticle.upsert({
       where: { url: article.url },
       create: {
         ...article,
+        topics,
+        entities,
         safetyStatus: 'approved',
         expiresAt,
       },
@@ -258,6 +274,8 @@ async function refreshStudentNews({ prisma, fetchImpl = fetch, feeds = DEFAULT_N
         summary: article.summary,
         imageUrl: article.imageUrl,
         publishedAt: article.publishedAt,
+        topics,
+        entities,
         safetyStatus: 'approved',
         expiresAt,
       },

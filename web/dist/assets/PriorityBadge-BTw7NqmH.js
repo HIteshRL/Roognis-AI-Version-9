@@ -1,0 +1,1 @@
+import{j as r,B as t}from"./index-Cn8aTGP-.js";const e={critical:"danger",high:"warn",medium:"primary",low:"default"},a={critical:"Critical",high:"High",medium:"Medium",low:"Low"};function n({priority:i}){return r.jsx(t,{tone:e[i],dot:!0,children:a[i]})}export{n as P};

@@ -1,0 +1,48 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: lms
+  namespace: roognis
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: lms
+  template:
+    metadata:
+      labels:
+        app: lms
+    spec:
+      containers:
+        - name: lms
+          image: roognis/lms:latest
+          command: ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "3006"]
+          ports:
+            - containerPort: 3006
+          envFrom:
+            - secretRef:
+                name: lms-secrets
+          env:
+            - name: PORT
+              value: "3006"
+            - name: LMS_DB_SCHEMA
+              value: "lms_db"
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 3006
+            initialDelaySeconds: 15
+            periodSeconds: 20
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 3006
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          resources:
+            requests:
+              cpu: "100m"
+              memory: "256Mi"
+            limits:
+              cpu: "500m"
+              memory: "512Mi"

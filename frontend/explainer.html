@@ -1,0 +1,105 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data:; form-action 'none'; base-uri 'none'">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Newton&#39;s Laws Demonstration</title>
+<style>
+:root {
+  --bg: #f9f7f3;
+  --surface: #ffffff;
+  --surface-2: #f2ece1;
+  --ink: #1a2d47;
+  --ink-muted: #5f5248;
+  --line: #e4dbcc;
+  --line-strong: #d8ccb8;
+  --accent: #c4965f;
+  --accent-ink: #1a2d47;
+  --accent-soft: #f3e4d0;
+  --green: #4a7c59;
+  --blue: #3d5a80;
+  --amber: #a8752e;
+  --red: #a4453b;
+  --font-body: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+  color-scheme: light dark;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #0f1826;
+    --surface: #16233a;
+    --surface-2: #1c2c47;
+    --ink: #f2ede4;
+    --ink-muted: #b9ac9d;
+    --line: #2b3a56;
+    --line-strong: #3a4c6c;
+    --accent: #d3a874;
+    --accent-ink: #14213a;
+    --accent-soft: #2b2419;
+    --green: #6ea37c;
+    --blue: #6f93b8;
+    --amber: #d19b4f;
+    --red: #c6685c;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #0f1826;
+  --surface: #16233a;
+  --surface-2: #1c2c47;
+  --ink: #f2ede4;
+  --ink-muted: #b9ac9d;
+  --line: #2b3a56;
+  --line-strong: #3a4c6c;
+  --accent: #d3a874;
+  --accent-ink: #14213a;
+  --accent-soft: #2b2419;
+  --green: #6ea37c;
+  --blue: #6f93b8;
+  --amber: #d19b4f;
+  --red: #c6685c;
+}
+:root[data-theme="light"] {
+  --bg: #f9f7f3;
+  --surface: #ffffff;
+  --surface-2: #f2ece1;
+  --ink: #1a2d47;
+  --ink-muted: #5f5248;
+  --line: #e4dbcc;
+  --line-strong: #d8ccb8;
+  --accent: #c4965f;
+  --accent-ink: #1a2d47;
+  --accent-soft: #f3e4d0;
+  --green: #4a7c59;
+  --blue: #3d5a80;
+  --amber: #a8752e;
+  --red: #a4453b;
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; padding: 0; }
+html { background: var(--surface); }
+body {
+  font-family: var(--font-body);
+  color: var(--ink);
+  background: var(--surface);
+  font-size: 14px;
+  line-height: 1.5;
+  padding: 12px;
+}
+svg { max-width: 100%; height: auto; }
+img, canvas { max-width: 100%; }
+button, input, select { font: inherit; color: inherit; }
+button { color: var(--ink); background: var(--surface-2); border: 1px solid var(--line);
+  border-radius: 8px; min-height: 40px; padding: 0 14px; cursor: pointer; }
+button:hover { border-color: var(--line-strong); }
+#container { background-color: var(--surface); } #object { background-color: var(--surface-2); } button { background-color: var(--accent); color: var(--ink); }
+</style>
+</head>
+<body>
+<div id='container' style='width: 100%; height: 400px; position: relative; border: 1px solid var(--line);'><div id='object' style='width: 50px; height: 50px; position: absolute; top: 50%; left: 50%; background-color: var(--surface-2);'>Object</div><button id='apply-force' style='position: absolute; top: 10px; left: 10px;'>Apply Force</button><button id='stop-force' style='position: absolute; top: 10px; left: 100px;'>Stop Force</button><p id='velocity' style='position: absolute; top: 10px; left: 200px;'>Velocity: 0</p></div>
+<script>
+(function(){
+let velocity = 0; let intervalId; document.getElementById('apply-force').addEventListener('click', () => { intervalId = setInterval(() => { velocity += 1; document.getElementById('velocity').innerText = 'Velocity: ' + velocity; document.getElementById('object').style.left = (50 + velocity) + '%'; }, 100); }); document.getElementById('stop-force').addEventListener('click', () => { clearInterval(intervalId); velocity = 0; document.getElementById('velocity').innerText = 'Velocity: ' + velocity; document.getElementById('object').style.left = '50%'; });
+})();
+</script>
+</body>
+</html>

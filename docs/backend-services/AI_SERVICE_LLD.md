@@ -1,5 +1,7 @@
 # AI Service LLD
 
+> **Historical LLD — verify routes and payloads against current code before use.**
+
 Service path: `services/ai`
 
 ## Purpose

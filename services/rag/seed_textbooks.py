@@ -11,6 +11,8 @@ import httpx
 
 AUTH_SERVICE_URL = os.getenv("AUTH_SERVICE_URL", "http://auth:3001").rstrip("/")
 RAG_SERVICE_URL = os.getenv("RAG_SERVICE_URL", "http://rag:3003").rstrip("/")
+# Default manifest is the local *demo* corpus (NCERT Class 8). The product
+# itself is curriculum-agnostic; teachers upload any board/curriculum PDF.
 MANIFEST_PATH = Path(
     os.getenv("TEXTBOOK_SEED_MANIFEST", "/app/seed-data/ncert/class-8-textbooks.json")
 )

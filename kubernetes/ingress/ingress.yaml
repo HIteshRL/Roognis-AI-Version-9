@@ -38,6 +38,27 @@ spec:
                 name: rag
                 port:
                   number: 3003
+          - path: /api/quiz
+            pathType: Prefix
+            backend:
+              service:
+                name: quiz
+                port:
+                  number: 3005
+          - path: /api/practice
+            pathType: Prefix
+            backend:
+              service:
+                name: practice
+                port:
+                  number: 3007
+          - path: /api/discover
+            pathType: Prefix
+            backend:
+              service:
+                name: discover
+                port:
+                  number: 3008
           - path: /api/analytics
             pathType: Prefix
             backend:
@@ -45,6 +66,13 @@ spec:
                 name: analytics
                 port:
                   number: 3004
+          - path: /api/lms
+            pathType: Prefix
+            backend:
+              service:
+                name: lms
+                port:
+                  number: 3006
           - path: /
             pathType: Prefix
             backend:

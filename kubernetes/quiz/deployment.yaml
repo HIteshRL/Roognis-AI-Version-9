@@ -1,0 +1,67 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: quiz
+  namespace: roognis
+  labels:
+    app: quiz
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: quiz
+  template:
+    metadata:
+      labels:
+        app: quiz
+    spec:
+      initContainers:
+        # Runs schema migration before the app starts, so only one pod applies
+        # it even with replicas > 1.
+        - name: db-migrate
+          image: roognis/quiz:latest
+          command: ["npx", "prisma", "migrate", "deploy", "--schema=prisma/schema.prisma"]
+          envFrom:
+            - secretRef:
+                name: quiz-secrets
+      containers:
+        - name: quiz
+          image: roognis/quiz:latest
+          command: ["node", "server.js"]
+          ports:
+            - containerPort: 3005
+          envFrom:
+            - secretRef:
+                name: quiz-secrets
+          env:
+            - name: PORT
+              value: "3005"
+            - name: NODE_ENV
+              value: production
+            # In-cluster service discovery. Quiz calls RAG for chapter context
+            # and AI to draft questions; it emits events to analytics.
+            - name: RAG_SERVICE_URL
+              value: "http://rag:3003"
+            - name: AI_SERVICE_URL
+              value: "http://ai:3002"
+            - name: ANALYTICS_URL
+              value: "http://analytics:3004"
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 3005
+            initialDelaySeconds: 15
+            periodSeconds: 20
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 3005
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          resources:
+            requests:
+              cpu: "100m"
+              memory: "128Mi"
+            limits:
+              cpu: "500m"
+              memory: "512Mi"

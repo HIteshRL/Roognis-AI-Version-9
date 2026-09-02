@@ -63,6 +63,137 @@ const BROAD_VIDEO_PATTERNS = [
   /\bquick\s+revision\b/i,
 ];
 
+// A small hand-picked set of safe, reputable search links, keyed to topics that
+// already exist in the seeded NCERT Class-8 catalogue. This exists so the Videos
+// pane and the tutor's video branch have something real to show when
+// YOUTUBE_API_KEY is not configured, instead of an "unavailable" message. Each
+// entry links to a channel/subject search page rather than a specific video ID —
+// a specific ID cannot be verified as live, appropriate, and on-topic without
+// actually browsing it, which this list does not do.
+const CURATED_VIDEO_TOPICS = [
+  {
+    topic: 'crop-production',
+    label: 'Crop Production and Management',
+    subject: 'Science',
+    keywords: ['crop production', 'crop production and management', 'irrigation', 'manure', 'fertiliser', 'fertilizer', 'agricultural implement'],
+    videos: [{ title: 'Crop production and management lessons', source: 'Khan Academy', url: 'https://www.khanacademy.org/search?page_search_query=crop%20production%20and%20management' }],
+  },
+  {
+    topic: 'photosynthesis',
+    label: 'Photosynthesis and Plant Nutrition',
+    subject: 'Science',
+    keywords: ['photosynthesis', 'plant nutrition', 'chlorophyll', 'autotrophic nutrition'],
+    videos: [{ title: 'Photosynthesis lessons', source: 'Khan Academy', url: 'https://www.khanacademy.org/search?page_search_query=photosynthesis' }],
+  },
+  {
+    topic: 'cell-structure',
+    label: 'Cell Structure and Functions',
+    subject: 'Science',
+    keywords: ['cell structure', 'cell nucleus', 'cytoplasm', 'cell membrane', 'cell organelle'],
+    videos: [{ title: 'Cell structure lessons', source: 'Khan Academy', url: 'https://www.khanacademy.org/search?page_search_query=cell%20structure' }],
+  },
+  {
+    topic: 'force-and-pressure',
+    label: 'Force and Pressure',
+    subject: 'Science',
+    keywords: ['force and pressure', 'friction', 'thrust'],
+    videos: [{ title: 'Force and pressure lessons', source: 'Khan Academy', url: 'https://www.khanacademy.org/search?page_search_query=force%20and%20pressure' }],
+  },
+  {
+    topic: 'squares-and-cubes',
+    label: 'Squares and Cubes',
+    subject: 'Mathematics',
+    keywords: ['perfect square', 'perfect cube', 'square number', 'cube number', 'square root', 'cube root'],
+    videos: [{ title: 'Squares and cubes lessons', source: 'Khan Academy', url: 'https://www.khanacademy.org/search?page_search_query=squares%20and%20cubes' }],
+  },
+  {
+    topic: 'rational-numbers',
+    label: 'Rational Numbers',
+    subject: 'Mathematics',
+    keywords: ['rational number', 'rational numbers'],
+    videos: [{ title: 'Rational numbers lessons', source: 'Khan Academy', url: 'https://www.khanacademy.org/search?page_search_query=rational%20numbers' }],
+  },
+  {
+    topic: 'pythagorean-theorem',
+    label: 'Pythagorean Theorem',
+    subject: 'Mathematics',
+    keywords: ['pythagorean theorem', 'pythagoras theorem', 'right triangle', 'hypotenuse'],
+    videos: [{ title: 'Pythagorean theorem lessons', source: 'Khan Academy', url: 'https://www.khanacademy.org/search?page_search_query=pythagorean%20theorem' }],
+  },
+  {
+    topic: 'linear-equations',
+    label: 'Linear Equations in One Variable',
+    subject: 'Mathematics',
+    keywords: ['linear equation', 'linear equations'],
+    videos: [{ title: 'Linear equations lessons', source: 'Khan Academy', url: 'https://www.khanacademy.org/search?page_search_query=linear%20equations' }],
+  },
+  {
+    topic: 'mensuration',
+    label: 'Mensuration: Area and Volume',
+    subject: 'Mathematics',
+    keywords: ['mensuration', 'surface area', 'area and volume', 'perimeter'],
+    videos: [{ title: 'Area and volume lessons', source: 'Khan Academy', url: 'https://www.khanacademy.org/search?page_search_query=area%20and%20volume' }],
+  },
+  {
+    topic: 'parliamentary-system',
+    label: 'The Parliamentary System',
+    subject: 'Social Science',
+    keywords: ['parliamentary system', 'parliament', 'legislature', 'executive'],
+    videos: [{ title: 'Parliamentary system lessons', source: 'Khan Academy', url: 'https://www.khanacademy.org/search?page_search_query=parliamentary%20system' }],
+  },
+  {
+    topic: 'mughal-maratha-history',
+    label: 'Mughal and Maratha History',
+    subject: 'Social Science',
+    keywords: ['mughal empire', 'maratha confederacy', 'mughal architecture'],
+    videos: [{ title: 'Mughal and Maratha history lessons', source: 'Khan Academy', url: 'https://www.khanacademy.org/search?page_search_query=mughal%20empire%20india%20history' }],
+  },
+  {
+    topic: 'natural-resources',
+    label: 'Natural Resources',
+    subject: 'Social Science',
+    keywords: ['natural resource', 'natural resources', 'renewable resource', 'conservation'],
+    videos: [{ title: 'Natural resources lessons', source: 'Khan Academy', url: 'https://www.khanacademy.org/search?page_search_query=natural%20resources' }],
+  },
+];
+
+function matchCuratedVideoTopic(intent) {
+  const normalizedTopic = normalizeSearchText(intent?.topicText || '');
+  if (!normalizedTopic) return null;
+
+  let best = null;
+  let bestScore = 0;
+  for (const entry of CURATED_VIDEO_TOPICS) {
+    for (const keyword of entry.keywords) {
+      const normalizedKeyword = normalizeSearchText(keyword);
+      if (!normalizedKeyword) continue;
+      const matches = normalizedTopic.includes(normalizedKeyword) || normalizedKeyword.includes(normalizedTopic);
+      if (matches && normalizedKeyword.length > bestScore) {
+        bestScore = normalizedKeyword.length;
+        best = entry;
+      }
+    }
+  }
+  return best;
+}
+
+function isVideoRequest(message) {
+  if (typeof message !== 'string') return false;
+  const text = message.trim();
+  if (!text) return false;
+
+  // "youtube"/"playlist" are themselves a request for video content, no verb needed.
+  if (/\b(youtube|playlist)\b/i.test(text)) return true;
+
+  // Otherwise require the video keyword to be paired with an explicit request verb or
+  // "watch" — not just present anywhere in the sentence. A question that merely mentions a
+  // video in passing ("I watched a video about X, can you explain it?") must still reach the
+  // tutor instead of short-circuiting into the video-search branch.
+  return /\b(show|find|get|play|recommend|suggest|send)\b[^.?!]{0,25}\bvideos?\b/i.test(text)
+    || /\bwatch\b[^.?!]{0,20}\b(a |the |some )?videos?\b/i.test(text)
+    || /\bvideo lecture\b/i.test(text);
+}
+
 function buildVideoSearchIntent(message, subject, grade) {
   const topicText = extractVideoTopicText(message, subject);
   if (!topicText) {
@@ -280,10 +411,13 @@ function toHumanTopicLabel(value) {
 }
 
 module.exports = {
+  isVideoRequest,
   buildVideoSearchIntent,
   rankRealtimeVideos,
   scoreVideoRelevance,
   normalizeSearchText,
   tokenizeSearchText,
   canonicalSearchToken,
+  CURATED_VIDEO_TOPICS,
+  matchCuratedVideoTopic,
 };

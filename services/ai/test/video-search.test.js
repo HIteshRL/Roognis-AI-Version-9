@@ -2,9 +2,27 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 
 const {
+  isVideoRequest,
   buildVideoSearchIntent,
   rankRealtimeVideos,
+  matchCuratedVideoTopic,
 } = require('../video-search');
+
+test('treats an explicit request for a video as a video request', () => {
+  assert.equal(isVideoRequest('can you show me a video about photosynthesis'), true);
+  assert.equal(isVideoRequest('can I watch a video on modes of nutrition'), true);
+  assert.equal(isVideoRequest('any good youtube video for this chapter'), true);
+  assert.equal(isVideoRequest('send me a playlist on the mughal empire'), true);
+  assert.equal(isVideoRequest('find a video lecture on the parliamentary system'), true);
+});
+
+test('does not hijack a normal tutor question that merely mentions a video', () => {
+  assert.equal(isVideoRequest('I watched a video about photosynthesis once, can you explain it?'), false);
+  assert.equal(isVideoRequest('my teacher showed us a video yesterday about the water cycle, what is it?'), false);
+  assert.equal(isVideoRequest('what is photosynthesis'), false);
+  assert.equal(isVideoRequest(''), false);
+  assert.equal(isVideoRequest(null), false);
+});
 
 test('extracts a clean topic from a student video request', () => {
   const intent = buildVideoSearchIntent('can u get me a video for modes of nutrition grade 6', 'Science', 6);
@@ -91,6 +109,18 @@ test('demotes exact-topic videos when they clearly target the wrong grade', () =
   ], intent);
 
   assert.match(ranked[0].title, /^Modes of Nutrition/);
+});
+
+test('matches a curated fallback topic for a seeded NCERT subject', () => {
+  const intent = buildVideoSearchIntent('get me a video on the pythagorean theorem', 'Maths', 8);
+  const curated = matchCuratedVideoTopic(intent);
+  assert.ok(curated);
+  assert.equal(curated.topic, 'pythagorean-theorem');
+});
+
+test('finds no curated fallback for an unrelated topic', () => {
+  const intent = buildVideoSearchIntent('get me a video on volcanoes', 'Science', 8);
+  assert.equal(matchCuratedVideoTopic(intent), null);
 });
 
 test('keeps photosynthesis videos when the student misspells the topic', () => {

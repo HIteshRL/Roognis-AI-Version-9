@@ -1,0 +1,67 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: practice
+  namespace: roognis
+  labels:
+    app: practice
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: practice
+  template:
+    metadata:
+      labels:
+        app: practice
+    spec:
+      initContainers:
+        # Runs schema migration before the app starts, so only one pod applies
+        # it even with replicas > 1.
+        - name: db-migrate
+          image: roognis/practice:latest
+          command: ["npx", "prisma", "migrate", "deploy", "--schema=prisma/schema.prisma"]
+          envFrom:
+            - secretRef:
+                name: practice-secrets
+      containers:
+        - name: practice
+          image: roognis/practice:latest
+          command: ["node", "server.js"]
+          ports:
+            - containerPort: 3007
+          envFrom:
+            - secretRef:
+                name: practice-secrets
+          env:
+            - name: PORT
+              value: "3007"
+            - name: NODE_ENV
+              value: production
+            # In-cluster service discovery. Practice calls RAG for chapter
+            # context and its own LLM provider directly (it is a standalone
+            # service, not a module inside ai — see CLAUDE.md); it emits
+            # events to analytics.
+            - name: RAG_SERVICE_URL
+              value: "http://rag:3003"
+            - name: ANALYTICS_URL
+              value: "http://analytics:3004"
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 3007
+            initialDelaySeconds: 15
+            periodSeconds: 20
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 3007
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          resources:
+            requests:
+              cpu: "100m"
+              memory: "128Mi"
+            limits:
+              cpu: "500m"
+              memory: "512Mi"

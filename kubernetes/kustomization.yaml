@@ -15,8 +15,16 @@ resources:
   - ai/service.yaml
   - rag/deployment.yaml
   - rag/service.yaml
+  - quiz/deployment.yaml
+  - quiz/service.yaml
+  - practice/deployment.yaml
+  - practice/service.yaml
+  - discover/deployment.yaml
+  - discover/service.yaml
   - analytics/deployment.yaml
   - analytics/service.yaml
+  - lms/deployment.yaml
+  - lms/service.yaml
   - frontend/deployment.yaml
   - frontend/service.yaml
   - ingress/ingress.yaml

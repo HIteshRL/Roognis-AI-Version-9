@@ -1,4 +1,6 @@
 const { needsGeneration } = require('./chapters');
+const { QUIZ_STATUS, ACTIVE_STATUSES } = require('./quiz-status');
+const { conceptIdForTag, misconceptionIdFor } = require('./concept-id');
 
 const DEFAULT_QUESTION_COUNT = 10;
 
@@ -38,11 +40,14 @@ async function generateQuizForSource(prisma, sourceInput, options = {}) {
 
   const activeQuiz = await findActiveQuiz(prisma, source);
   if (!options.force && !needsGeneration(source, activeQuiz)) {
-    if (source.quizStatus !== 'ready' || source.activeQuizId !== activeQuiz.id) {
+    // Mirror the quiz's real status onto the source rather than assuming
+    // `ready` — an existing quiz may still be awaiting teacher approval, and
+    // stamping the source `ready` would advertise it as publishable.
+    if (source.quizStatus !== activeQuiz.status || source.activeQuizId !== activeQuiz.id) {
       await prisma.chapterQuizSource.update({
         where: { id: source.id },
         data: {
-          quizStatus: 'ready',
+          quizStatus: activeQuiz.status,
           activeQuizId: activeQuiz.id,
           lastGenerationError: null,
           lastGeneratedAt: source.lastGeneratedAt || activeQuiz.createdAt,
@@ -119,7 +124,9 @@ async function findActiveQuiz(prisma, source) {
   return prisma.quiz.findFirst({
     where: {
       sourceId: source.id,
-      status: 'ready',
+      // A quiz awaiting review still occupies the slot; treating only `ready`
+      // as active would regenerate over a teacher's pending decision.
+      status: { in: ACTIVE_STATUSES },
     },
     orderBy: { createdAt: 'desc' },
   });
@@ -200,12 +207,15 @@ async function persistQuizDraft(prisma, source, draftResult, options = {}) {
   const draft = draftResult.draft;
   const counts = countDifficulties(draft.questions || []);
   const quiz = await prisma.$transaction(async tx => {
+    // Archive whatever currently occupies the slot — an approved quiz *or* one
+    // still awaiting review. Only matching `ready` here would leave an orphaned
+    // pending draft behind on every regeneration.
     await tx.quiz.updateMany({
       where: {
         sourceId: source.id,
-        status: 'ready',
+        status: { in: ACTIVE_STATUSES },
       },
-      data: { status: 'archived' },
+      data: { status: QUIZ_STATUS.ARCHIVED },
     });
 
     const created = await tx.quiz.create({
@@ -215,7 +225,9 @@ async function persistQuizDraft(prisma, source, draftResult, options = {}) {
         teacherId: options.teacherId || null,
         title: draft.title,
         chapterSummary: draft.chapterSummary,
-        status: 'ready',
+        // Not `ready`. A teacher approves before any student can open it —
+        // nothing here can verify that the model's answer keys are correct.
+        status: QUIZ_STATUS.PENDING_REVIEW,
         questionCount: draft.questions.length,
         simpleCount: counts.simple,
         mediumCount: counts.medium,
@@ -227,20 +239,26 @@ async function persistQuizDraft(prisma, source, draftResult, options = {}) {
           create: draft.questions
             .slice()
             .sort((a, b) => Number(a.order || 0) - Number(b.order || 0))
-            .map((question, index) => ({
-              orderIndex: index + 1,
-              type: question.type,
-              difficulty: question.difficulty,
-              bloomLevel: question.bloomLevel,
-              conceptTag: question.conceptTag,
-              weakAreaLabel: question.weakAreaLabel,
-              prompt: question.prompt,
-              options: Array.isArray(question.options) ? question.options : [],
-              correctAnswer: question.correctAnswer,
-              explanation: question.explanation,
-              sourceChunkIds: question.sourceChunkIds || [],
-              marks: Number(question.marks || 1),
-            })),
+            .map((question, index) => {
+              const conceptId = conceptIdForTag(question.conceptTag);
+              const misconceptionId = misconceptionIdFor(conceptId, question.weakAreaLabel);
+              return {
+                orderIndex: index + 1,
+                type: question.type,
+                difficulty: question.difficulty,
+                bloomLevel: question.bloomLevel,
+                conceptTag: question.conceptTag,
+                conceptId,
+                misconceptionIds: misconceptionId ? [misconceptionId] : [],
+                weakAreaLabel: question.weakAreaLabel,
+                prompt: question.prompt,
+                options: Array.isArray(question.options) ? question.options : [],
+                correctAnswer: question.correctAnswer,
+                explanation: question.explanation,
+                sourceChunkIds: question.sourceChunkIds || [],
+                marks: Number(question.marks || 1),
+              };
+            }),
         },
       },
       include: { questions: true },
@@ -249,7 +267,7 @@ async function persistQuizDraft(prisma, source, draftResult, options = {}) {
     await tx.chapterQuizSource.update({
       where: { id: source.id },
       data: {
-        quizStatus: 'ready',
+        quizStatus: QUIZ_STATUS.PENDING_REVIEW,
         activeQuizId: created.id,
         lastGenerationError: null,
         lastGeneratedAt: new Date(),

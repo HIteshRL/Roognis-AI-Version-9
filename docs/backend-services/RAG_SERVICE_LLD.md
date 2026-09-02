@@ -1,5 +1,7 @@
 # RAG Service / EKE LLD
 
+> **Historical LLD — verify routes, lifecycle states, and retrieval behavior against current code before use.**
+
 Service path: `services/rag`
 
 Detailed ingestion contract: `docs/backend-services/RAG_EKE_INGESTION_CONTRACT.md`
@@ -25,9 +27,7 @@ Without EKE-backed retrieval, chat and quizzes can run technically but will not 
 Implemented:
 
 - `GET /health`
-- `GET /api/rag/retrieve`
-
-Current retrieve endpoint returns empty chunks.
+- Current internal retrieval and chapter-context routes are service-token protected; verify their exact paths in `services/rag/main.py`.
 
 ## Gaps
 

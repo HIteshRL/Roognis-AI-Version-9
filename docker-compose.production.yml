@@ -33,6 +33,14 @@ services:
     mem_limit: 2g
     cpus: 0.75
 
+  neo4j:
+    <<: *production-service
+    environment:
+      NEO4J_AUTH: "neo4j/${NEO4J_PASSWORD:?Set NEO4J_PASSWORD in .env.production}"
+      NEO4J_PASSWORD: ${NEO4J_PASSWORD:?Set NEO4J_PASSWORD in .env.production}
+    mem_limit: 2g
+    cpus: 0.75
+
   auth:
     <<: *production-service
     build:
@@ -47,7 +55,7 @@ services:
              node scripts/seed.js &&
              node server.js"
     environment:
-      DATABASE_URL: "postgresql://postgres:${DB_PASSWORD:?Set DB_PASSWORD in .env.production}@postgres:5432/roognis?schema=auth_db"
+      DATABASE_URL: "postgresql://postgres:${DB_PASSWORD:?Set DB_PASSWORD in .env.production}@postgres:5432/roognis?schema=auth_db&connection_limit=10&pool_timeout=10"
       JWT_SECRET: ${JWT_SECRET:?Set JWT_SECRET in .env.production}
       SEED_DEMO_USERS: "false"
       BOOTSTRAP_ENABLED: ${BOOTSTRAP_ENABLED:-false}
@@ -79,7 +87,10 @@ services:
     command: >
       sh -c "npx prisma migrate deploy --schema=prisma/schema.prisma && node server.js"
     environment:
-      DATABASE_URL: "postgresql://postgres:${DB_PASSWORD:?Set DB_PASSWORD in .env.production}@postgres:5432/roognis?schema=ai_db"
+      # Hardcoded, not ${VAR:-false}: an operator must not be able to turn
+      # synthetic demo history on in production from .env.
+      SEED_DEMO_HISTORY: "false"
+      DATABASE_URL: "postgresql://postgres:${DB_PASSWORD:?Set DB_PASSWORD in .env.production}@postgres:5432/roognis?schema=ai_db&connection_limit=10&pool_timeout=10"
       JWT_SECRET: ${JWT_SECRET:?Set JWT_SECRET in .env.production}
       INTERNAL_SERVICE_TOKEN: ${INTERNAL_SERVICE_TOKEN:?Set INTERNAL_SERVICE_TOKEN in .env.production}
       GEMINI_API_KEY: ${GEMINI_API_KEY:?Set GEMINI_API_KEY in .env.production}
@@ -136,7 +147,10 @@ services:
     command: >
       sh -c "npx prisma migrate deploy --schema=prisma/schema.prisma && node server.js"
     environment:
-      DATABASE_URL: "postgresql://postgres:${DB_PASSWORD:?Set DB_PASSWORD in .env.production}@postgres:5432/roognis?schema=quiz_db"
+      # Hardcoded, not ${VAR:-false}: an operator must not be able to turn
+      # synthetic demo history on in production from .env.
+      SEED_DEMO_HISTORY: "false"
+      DATABASE_URL: "postgresql://postgres:${DB_PASSWORD:?Set DB_PASSWORD in .env.production}@postgres:5432/roognis?schema=quiz_db&connection_limit=10&pool_timeout=10"
       JWT_SECRET: ${JWT_SECRET:?Set JWT_SECRET in .env.production}
       INTERNAL_SERVICE_TOKEN: ${INTERNAL_SERVICE_TOKEN:?Set INTERNAL_SERVICE_TOKEN in .env.production}
     labels:
@@ -154,6 +168,157 @@ services:
     mem_limit: 768m
     cpus: 0.40
 
+  # Standalone, deliberately ungated — see docker-compose.yml's comment above
+  # this service and CLAUDE.md for why it never shares a gate with quiz.
+  practice:
+    <<: *production-service
+    build:
+      context: ./services/practice
+      args:
+        NPM_STRICT_SSL: "true"
+        NPM_REGISTRY: https://registry.npmjs.org
+        NPM_REPLACE_REGISTRY_HOST: never
+        PRISMA_NODE_TLS_REJECT_UNAUTHORIZED: "1"
+    command: >
+      sh -c "npx prisma migrate deploy --schema=prisma/schema.prisma && node server.js"
+    environment:
+      DATABASE_URL: "postgresql://postgres:${DB_PASSWORD:?Set DB_PASSWORD in .env.production}@postgres:5432/roognis?schema=practice_db&connection_limit=10&pool_timeout=10"
+      JWT_SECRET: ${JWT_SECRET:?Set JWT_SECRET in .env.production}
+      INTERNAL_SERVICE_TOKEN: ${INTERNAL_SERVICE_TOKEN:?Set INTERNAL_SERVICE_TOKEN in .env.production}
+      OPENROUTER_API_KEY: ${OPENROUTER_API_KEY:?Set OPENROUTER_API_KEY in .env.production}
+      OPENROUTER_SITE_URL: https://${APP_DOMAIN:?Set APP_DOMAIN in .env.production}
+    labels:
+      - "traefik.http.routers.practice.rule=Host(`${APP_DOMAIN:?Set APP_DOMAIN in .env.production}`) && PathPrefix(`/api/practice`)"
+      - "traefik.http.routers.practice.entrypoints=websecure"
+      - "traefik.http.routers.practice.tls=true"
+      - "traefik.http.routers.practice.tls.certresolver=letsencrypt"
+      - "traefik.http.routers.practice.middlewares=security-headers@file,compress@file,api-rate-limit@file"
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:3007/health || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    mem_limit: 768m
+    cpus: 0.40
+
+  discover:
+    <<: *production-service
+    build:
+      context: ./services/discover
+      args:
+        NPM_STRICT_SSL: "true"
+        NPM_REGISTRY: https://registry.npmjs.org
+        NPM_REPLACE_REGISTRY_HOST: never
+        PRISMA_NODE_TLS_REJECT_UNAUTHORIZED: "1"
+    command: >
+      sh -c "npx prisma migrate deploy --schema=prisma/schema.prisma && node server.js"
+    environment:
+      DATABASE_URL: "postgresql://postgres:${DB_PASSWORD:?Set DB_PASSWORD in .env.production}@postgres:5432/roognis?schema=discover_db&connection_limit=10&pool_timeout=10"
+      JWT_SECRET: ${JWT_SECRET:?Set JWT_SECRET in .env.production}
+      INTERNAL_SERVICE_TOKEN: ${INTERNAL_SERVICE_TOKEN:?Set INTERNAL_SERVICE_TOKEN in .env.production}
+      AI_SERVICE_URL: "http://ai:3002"
+      ANALYTICS_URL: "http://analytics:3004"
+      OPENROUTER_API_KEY: ${OPENROUTER_API_KEY:?Set OPENROUTER_API_KEY in .env.production}
+      OPENROUTER_SITE_URL: https://${APP_DOMAIN:?Set APP_DOMAIN in .env.production}
+      # Optional: without it the hunt is disabled and the RSS genres still serve.
+      TAVILY_API_KEY: ${TAVILY_API_KEY:-}
+      DISCOVER_HUNT_ENABLED: ${DISCOVER_HUNT_ENABLED:-true}
+      DISCOVER_HUNT_INTERVAL_MS: ${DISCOVER_HUNT_INTERVAL_MS:-10800000}
+      # Optional: without it the video hunt is disabled, everything else serves.
+      YOUTUBE_API_KEY: ${YOUTUBE_API_KEY:-}
+      DISCOVER_VIDEO_HUNT_ENABLED: ${DISCOVER_VIDEO_HUNT_ENABLED:-true}
+      DISCOVER_VIDEO_HUNT_INTERVAL_MS: ${DISCOVER_VIDEO_HUNT_INTERVAL_MS:-86400000}
+      DISCOVER_VIDEO_HUNT_DAILY_SEARCH_BUDGET: ${DISCOVER_VIDEO_HUNT_DAILY_SEARCH_BUDGET:-3000}
+      DISCOVER_VIDEO_TRUSTED_CHANNELS: ${DISCOVER_VIDEO_TRUSTED_CHANNELS:-}
+      OPENROUTER_VIDEO_HUNT_MODEL: ${OPENROUTER_VIDEO_HUNT_MODEL:-openai/gpt-5-mini}
+    labels:
+      - "traefik.http.routers.discover.rule=Host(`${APP_DOMAIN:?Set APP_DOMAIN in .env.production}`) && PathPrefix(`/api/discover`)"
+      - "traefik.http.routers.discover.entrypoints=websecure"
+      - "traefik.http.routers.discover.tls=true"
+      - "traefik.http.routers.discover.tls.certresolver=letsencrypt"
+      - "traefik.http.routers.discover.middlewares=security-headers@file,compress@file,api-rate-limit@file"
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:3008/health || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    mem_limit: 768m
+    cpus: 0.40
+
+  kg:
+    <<: *production-service
+    environment:
+      NEO4J_PASSWORD: ${NEO4J_PASSWORD:?Set NEO4J_PASSWORD in .env.production}
+      INTERNAL_SERVICE_TOKEN: ${INTERNAL_SERVICE_TOKEN:?Set INTERNAL_SERVICE_TOKEN in .env.production}
+    mem_limit: 768m
+    cpus: 0.40
+
+  preference-gnn:
+    <<: *production-service
+    environment:
+      INTERNAL_SERVICE_TOKEN: ${INTERNAL_SERVICE_TOKEN:?Set INTERNAL_SERVICE_TOKEN in .env.production}
+    mem_limit: 768m
+    cpus: 0.50
+
+  preference-gnn-trainer:
+    <<: *production-service
+    environment:
+      INTERNAL_SERVICE_TOKEN: ${INTERNAL_SERVICE_TOKEN:?Set INTERNAL_SERVICE_TOKEN in .env.production}
+    mem_limit: 768m
+    cpus: 0.50
+
+  knowledge-gnn:
+    <<: *production-service
+    environment:
+      INTERNAL_SERVICE_TOKEN: ${INTERNAL_SERVICE_TOKEN:?Set INTERNAL_SERVICE_TOKEN in .env.production}
+    mem_limit: 768m
+    cpus: 0.50
+
+  knowledge-gnn-trainer:
+    <<: *production-service
+    environment:
+      INTERNAL_SERVICE_TOKEN: ${INTERNAL_SERVICE_TOKEN:?Set INTERNAL_SERVICE_TOKEN in .env.production}
+    mem_limit: 768m
+    cpus: 0.50
+
+  decisions:
+    <<: *production-service
+    environment:
+      INTERNAL_SERVICE_TOKEN: ${INTERNAL_SERVICE_TOKEN:?Set INTERNAL_SERVICE_TOKEN in .env.production}
+    mem_limit: 384m
+    cpus: 0.25
+
+  psv:
+    <<: *production-service
+    environment:
+      DATABASE_URL: "postgresql://postgres:${DB_PASSWORD:?Set DB_PASSWORD in .env.production}@postgres:5432/roognis"
+      JWT_SECRET: ${JWT_SECRET:?Set JWT_SECRET in .env.production}
+      INTERNAL_SERVICE_TOKEN: ${INTERNAL_SERVICE_TOKEN:?Set INTERNAL_SERVICE_TOKEN in .env.production}
+    labels:
+      - "traefik.http.routers.psv.rule=Host(`${APP_DOMAIN:?Set APP_DOMAIN in .env.production}`) && PathPrefix(`/api/psv`)"
+      - "traefik.http.routers.psv.entrypoints=websecure"
+      - "traefik.http.routers.psv.tls=true"
+      - "traefik.http.routers.psv.tls.certresolver=letsencrypt"
+      - "traefik.http.routers.psv.middlewares=security-headers@file,compress@file,api-rate-limit@file"
+    mem_limit: 768m
+    cpus: 0.45
+
+  privacy:
+    <<: *production-service
+    environment:
+      JWT_SECRET: ${JWT_SECRET:?Set JWT_SECRET in .env.production}
+      INTERNAL_SERVICE_TOKEN: ${INTERNAL_SERVICE_TOKEN:?Set INTERNAL_SERVICE_TOKEN in .env.production}
+    labels:
+      - "traefik.http.routers.privacy.rule=Host(`${APP_DOMAIN:?Set APP_DOMAIN in .env.production}`) && PathPrefix(`/api/privacy`)"
+      - "traefik.http.routers.privacy.entrypoints=websecure"
+      - "traefik.http.routers.privacy.tls=true"
+      - "traefik.http.routers.privacy.tls.certresolver=letsencrypt"
+      - "traefik.http.routers.privacy.middlewares=security-headers@file,compress@file,api-rate-limit@file"
+    mem_limit: 384m
+    cpus: 0.25
+
   analytics:
     <<: *production-service
     build:
@@ -166,7 +331,10 @@ services:
     command: >
       sh -c "npx prisma migrate deploy --schema=prisma/schema.prisma && node server.js"
     environment:
-      DATABASE_URL: "postgresql://postgres:${DB_PASSWORD:?Set DB_PASSWORD in .env.production}@postgres:5432/roognis?schema=analytics_db"
+      # Hardcoded, not ${VAR:-false}: an operator must not be able to turn
+      # synthetic demo history on in production from .env.
+      SEED_DEMO_HISTORY: "false"
+      DATABASE_URL: "postgresql://postgres:${DB_PASSWORD:?Set DB_PASSWORD in .env.production}@postgres:5432/roognis?schema=analytics_db&connection_limit=10&pool_timeout=10"
       JWT_SECRET: ${JWT_SECRET:?Set JWT_SECRET in .env.production}
       INTERNAL_SERVICE_TOKEN: ${INTERNAL_SERVICE_TOKEN:?Set INTERNAL_SERVICE_TOKEN in .env.production}
     labels:
@@ -183,6 +351,30 @@ services:
       start_period: 30s
     mem_limit: 768m
     cpus: 0.40
+
+  lms:
+    <<: *production-service
+    environment:
+      DATABASE_URL: "postgresql://postgres:${DB_PASSWORD:?Set DB_PASSWORD in .env.production}@postgres:5432/roognis"
+      LMS_DB_SCHEMA: lms_db
+      JWT_SECRET: ${JWT_SECRET:?Set JWT_SECRET in .env.production}
+      INTERNAL_SERVICE_TOKEN: ${INTERNAL_SERVICE_TOKEN:?Set INTERNAL_SERVICE_TOKEN in .env.production}
+      ANALYTICS_URL: "http://analytics:3004"
+      RAG_SERVICE_URL: "http://rag:3003"
+    labels:
+      - "traefik.http.routers.lms.rule=Host(`${APP_DOMAIN:?Set APP_DOMAIN in .env.production}`) && PathPrefix(`/api/lms`)"
+      - "traefik.http.routers.lms.entrypoints=websecure"
+      - "traefik.http.routers.lms.tls=true"
+      - "traefik.http.routers.lms.tls.certresolver=letsencrypt"
+      - "traefik.http.routers.lms.middlewares=security-headers@file,compress@file,api-rate-limit@file"
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:3006/health || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    mem_limit: 512m
+    cpus: 0.35
 
   frontend:
     <<: *production-service

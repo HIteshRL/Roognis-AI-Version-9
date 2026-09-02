@@ -1,5 +1,7 @@
 const crypto = require('crypto');
 
+const { isActive } = require('./quiz-status');
+
 const DEFAULT_TEXT = 'Unknown';
 
 function normalizeChapterPayload(input = {}) {
@@ -81,7 +83,11 @@ async function upsertChapterSource(prisma, payload) {
 function needsGeneration(source, activeQuiz) {
   if (!source) return false;
   if (!activeQuiz) return true;
-  if (activeQuiz.status !== 'ready') return true;
+  // `isActive` covers both `ready` and `pending_review`. Testing for `ready`
+  // alone meant a quiz sitting in review looked like a missing quiz, so every
+  // sync would regenerate over the teacher's pending decision and re-spend the
+  // model call.
+  if (!isActive(activeQuiz.status)) return true;
   return activeQuiz.contentFingerprint !== source.contentFingerprint;
 }
 

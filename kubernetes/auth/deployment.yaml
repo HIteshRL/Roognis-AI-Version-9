@@ -18,21 +18,26 @@ spec:
       initContainers:
         # Runs schema migration before the app starts.
         # initContainer ensures only one pod runs migrations even with replicas > 1.
+        # No --accept-data-loss: a drifted schema must fail loudly, not drop columns.
         - name: db-migrate
           image: roognis/auth:latest
-          command: ["npx", "prisma", "db", "push", "--schema=prisma/schema.prisma", "--accept-data-loss"]
+          command: ["npx", "prisma", "db", "push", "--schema=prisma/schema.prisma"]
+          envFrom:
+            - secretRef:
+                name: auth-secrets
+        # Seed is idempotent and must finish before the server accepts traffic.
+        # It belongs here, not in a postStart hook — postStart does not gate readiness
+        # and its process is not the container's main process.
+        - name: seed
+          image: roognis/auth:latest
+          command: ["node", "scripts/seed.js"]
           envFrom:
             - secretRef:
                 name: auth-secrets
       containers:
         - name: auth
           image: roognis/auth:latest
-          command: ["node", "scripts/seed.js"]
-          # Seed runs once on first deploy, then the app starts
-          lifecycle:
-            postStart:
-              exec:
-                command: ["node", "server.js"]
+          command: ["node", "server.js"]
           ports:
             - containerPort: 3001
           envFrom:

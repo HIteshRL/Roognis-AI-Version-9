@@ -8,20 +8,75 @@ const KNOWN_EVENT_TYPES = [
   'feedback_submitted',
   'image_generated',
   'image_prompt_blocked',
+  // A structured visual (concept map) built from a chapter's own text and
+  // rendered as SVG — distinct from `image_generated`, which is the diffusion
+  // path. Both feed the same "Diagrams" counters on the dashboards.
+  'visual_generated',
+  // services/practice — instant, ungated summary/flashcard/quiz generation.
+  // Deliberately separate from the quiz_* events above, which belong to the
+  // teacher-approval-gated Quiz pipeline in services/quiz; these two never
+  // share a status or a gate. See CLAUDE.md / HANDOFF.md for why.
+  'practice_generated',
+  'practice_completed',
+  // services/discover — ambient academic revision. A card is generated from a
+  // weak area the student already has, and `academic_card_attempted` is the
+  // micro-recall answer. Its metadata deliberately carries no conceptTag: the
+  // teacher dashboard renders recent events verbatim, and the targeted concept
+  // is learner-derived data about a named student, blocked until
+  // services/privacy exists.
+  'academic_card_generated',
+  'academic_card_attempted',
   'safety_input_blocked',
   'safety_output_blocked',
   'video_recommended',
   'video_opened',
-  'video_completed',
   'study_time_tracked',
+  // A chapter-scoped tutor session being created *is* a lesson starting in this
+  // product — see the session route in services/ai/server.js.
   'lesson_started',
-  'lesson_completed',
   'quiz_draft_created',
   'quiz_draft_generation_failed',
   'quiz_published',
   'quiz_opened',
   'quiz_submitted',
   'quiz_graded',
+  // A deterministic client-side rule (turn count on a chapter), never an LLM
+  // decision — see services/ai/server.js's quiz-shown route. Distinguishes a
+  // system-surfaced nudge from a student opening the quiz list unprompted.
+  'quiz_nudge_shown',
+  // Emitted when a student finishes onboarding. This was emitted for a long
+  // time without being listed here, so every one of them was 400'd and dropped
+  // by the fire-and-forget emitter.
+  'student_onboarding_completed',
+  // services/discover — the agentic Discover feed. discover_article_opened
+  // measures what students actually read; the two interest_* events record a
+  // human answering the "you seem interested in X" card, which is the gate an
+  // LLM-proposed interest must pass before it becomes a graph node.
+  // The hunt itself fires nothing here: it spans every school holding a topic,
+  // so it has no honest schoolId, and this route requires one.
+  'discover_article_opened',
+  // discover_article_dwell measures actual reading time (glass-sheet open
+  // duration, ms >= 2000); discover_headline_dwell measures how long a
+  // headline card sits in view before being opened or scrolled past
+  // (ms >= 400) — both distinct from discover_article_opened above, which
+  // only measures the open action itself.
+  'discover_article_dwell',
+  'discover_headline_dwell',
+  // Video recommendations — same shape as the article events above, mirrored
+  // for DiscoverVideo/VideoSignal (services/discover/hunt/video-run.js).
+  // discover_video_opened measures what students actually watch;
+  // discover_video_dwell is real watch time, not a headline-preview signal
+  // (there is no video equivalent of discover_headline_dwell).
+  'discover_video_opened',
+  'discover_video_dwell',
+  'interest_confirmed',
+  'interest_rejected',
+  // LMS / Classroom service (services/lms) — Google-Classroom parity events
+  'classroom_created',
+  'student_enrolled',
+  'coursework_published',
+  'coursework_submitted',
+  'coursework_graded',
 ];
 
 function isValidUuid(value) {

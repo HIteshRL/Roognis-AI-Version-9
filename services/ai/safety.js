@@ -47,6 +47,35 @@ function getChatSafetyRules() {
       reason: 'Self-harm content is not appropriate for the AI tutor.',
       patterns: [
         /\b(kill myself|end my life|suicide|self[- ]?harm|cut myself|hurt myself)\b/i,
+        // The product ships to Indian schools and carries `language`, `board`
+        // and `curriculum` fields throughout, but every rule here was
+        // English-ASCII — so the same disclosure in Hindi or Hinglish reached
+        // an unconstrained model and produced a fluent reply with no block and
+        // no flag. These cover the highest-stakes category only; the rest of
+        // the rule set is still English-only (see `isLikelyUnassessable`).
+        /(आत्महत्या|खुदकुशी|मरना चाहता|मरना चाहती|खुद को मार)/,
+        /\b(aatmahatya|atmahatya|khudkushi|khudkhushi)\b/i,
+        // First person only: "main marna chahta hoon" is a disclosure, while
+        // "usko marna chahta" is a threat toward someone else and belongs to
+        // `dangerous_instructions`, not here.
+        /\b(main|mai|mein|mujhe)\b.{0,24}\bmarna chaht[aiy]/i,
+        /\bkhud ko\b.{0,20}\b(maar|marna|nuksan)/i,
+      ],
+    },
+    {
+      // Absent entirely before this. For a product used by children it is the
+      // most consequential gap in the rule set: none of the phrases below
+      // matched any existing category, so grooming approaches passed straight
+      // through to the tutor.
+      category: 'grooming',
+      reason: 'This looks like an unsafe request. A teacher has been notified so someone can check you are OK.',
+      patterns: [
+        /\b(do ?n[o']?t|don't|never)\b.{0,25}\btell\b.{0,25}\b(your |ur )?(parents?|mum|mom|mother|dad|father|teacher|anyone)\b/i,
+        /\b(our|its? a|keep it a)\b.{0,10}\bsecret\b.{0,25}\b(between us|from your|do ?n[o']?t tell)\b/i,
+        /\bsend (me|us)\b.{0,25}\b(a )?(photo|picture|pic|video|selfie)\b.{0,15}\b(of )?(you|yourself|your body)\b/i,
+        /\b(what|whats|what's)\b.{0,15}\byour\b.{0,10}\b(home )?address\b/i,
+        /\bmeet me\b.{0,25}\b(alone|after school|in person|without)\b/i,
+        /\bare you (home )?alone\b/i,
       ],
     },
     {
@@ -130,8 +159,45 @@ function getGeminiSafetySettings() {
   }));
 }
 
+/**
+ * Categories that route to a human rather than just a refusal.
+ *
+ * MASTERCONTEXT §12: "Anything resembling a well-being concern routes to a
+ * human teacher via flag — never automated inference, never automated parent
+ * notification." A refusal plus an anonymous +1 in a weekly counter, which is
+ * all this used to produce, is not that.
+ *
+ * Deliberately narrow. Flagging profanity or a question about drugs in a
+ * chemistry chapter would bury the two categories where a child may actually
+ * be at risk. The flag records only *that a rule fired* — it is not a judgement
+ * about the child, and no clinical construct is stored (§12).
+ */
+const WELFARE_REVIEW_CATEGORIES = ['self_harm', 'grooming'];
+
+const isWelfareConcern = (category) => WELFARE_REVIEW_CATEGORIES.includes(category);
+
+/**
+ * True when the rule set almost certainly cannot assess this text.
+ *
+ * Every rule except the self-harm additions is English ASCII, so text in
+ * another script passes unexamined. This does not block — that would break a
+ * deliberately multilingual product — it exists so the limitation is
+ * expressible in code and has a seam for a real classifier, instead of being
+ * an invisible hole.
+ */
+function isLikelyUnassessable(text) {
+  if (typeof text !== 'string') return false;
+  const letters = text.replace(/[^\p{L}]/gu, '');
+  if (letters.length < 8) return false;
+  const latin = letters.replace(/[^\p{Script=Latin}]/gu, '').length;
+  return latin / letters.length < 0.5;
+}
+
 module.exports = {
   SAFE_REFUSAL_MESSAGE,
+  WELFARE_REVIEW_CATEGORIES,
+  isWelfareConcern,
+  isLikelyUnassessable,
   validateStudentMessageSafety,
   validateGeneratedTextSafety,
   validateImagePromptSafety,

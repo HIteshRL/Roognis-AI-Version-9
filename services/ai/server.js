@@ -11,10 +11,14 @@ const {
   validateGeneratedTextSafety,
   validateImagePromptSafety,
   getGeminiSafetySettings,
+  isWelfareConcern,
 } = require('./safety');
 const {
+  isVideoRequest,
   buildVideoSearchIntent,
   rankRealtimeVideos,
+  CURATED_VIDEO_TOPICS,
+  matchCuratedVideoTopic,
 } = require('./video-search');
 const {
   generateQuizDraft,
@@ -36,17 +40,60 @@ const {
   buildQuizLearningContextUrl,
 } = require('./quiz-learning-context');
 const {
+  normalizePracticeLearningContext,
+  formatPracticeLearningContextForPrompt,
+  buildPracticeLearningContextUrl,
+} = require('./practice-learning-context');
+const {
   refreshStudentNews,
   balanceNewsCategories,
 } = require('./student-news');
+const { GENRES, rankArticles, TOPIC_BY_KEY } = require('./interest-graph');
+const {
+  applySignal,
+  loadNodes,
+  nodesToVector,
+  rebuildProfile,
+  loadGraph,
+} = require('./interest-store');
+// The interest graph now lives in services/discover. The news/interest routes
+// below remain as deprecated shims for one release (the frontend has moved to
+// /api/discover/*); the tutor already reads the authoritative graph from there.
+const { loadStudentInterestContext } = require('./discover-interest-context');
+const {
+  loadStudentKnowledgeGapContext,
+  formatKnowledgeGapContextForPrompt,
+} = require('./knowledge-gap-context');
+const { summariseChatHistory } = require('./chat-insights');
+const { VISUAL_KINDS, INERT_KINDS, EXECUTABLE_KINDS, isGeneratedHere } = require('./visuals/kinds');
+const { routeVisualIntent } = require('./visuals/intent');
+const {
+  fetchChapterContext,
+  selectGroundingChunks,
+  chapterKeyFor,
+  conceptSlugFor,
+  buildProvenance,
+} = require('./visuals/grounding');
+const { collectSpecText } = require('./visuals/spec-validate');
+const { collectExplainerText } = require('./visuals/explainer-validate');
+const { normalizeTheme } = require('./visuals/theme-tokens');
+const { generateVisualSpec, visualPayloadKey, renderVisual, describeVisual } = require('./visuals');
+
+const NEWS_SIGNAL_KINDS = new Set(['impression', 'open', 'dwell', 'share', 'skip']);
 
 const app = express();
 const prisma = new PrismaClient();
 const PORT = process.env.PORT || 3002;
-const LLM_PROVIDER = normalizeProvider(process.env.LLM_PROVIDER, ['gemini', 'ollama'], 'gemini');
+const LLM_PROVIDER = normalizeProvider(process.env.LLM_PROVIDER, ['gemini', 'ollama', 'groq'], 'gemini');
 const IMAGE_PROVIDER = normalizeProvider(process.env.IMAGE_PROVIDER, ['gemini', 'comfyui'], 'gemini');
 const OLLAMA_URL = process.env.OLLAMA_URL || 'http://ollama:11434';
 const OLLAMA_MODEL = process.env.OLLAMA_MODEL || 'qwen2.5';
+// Groq (OpenAI-compatible) — keyless local models aside, this is a hosted
+// drop-in for the tutor chat path. Uses the standard /chat/completions schema.
+const GROQ_API_KEY = process.env.GROQ_API_KEY || '';
+const GROQ_API_BASE_URL = process.env.GROQ_API_BASE_URL || 'https://api.groq.com/openai/v1';
+const GROQ_MODEL = process.env.GROQ_MODEL || 'openai/gpt-oss-120b';
+const GROQ_TEXT_TIMEOUT_MS = Number(process.env.GROQ_TEXT_TIMEOUT_MS || 30000);
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY || '';
 const GEMINI_API_BASE_URL = process.env.GEMINI_API_BASE_URL || 'https://generativelanguage.googleapis.com/v1beta';
 const GEMINI_TEXT_MODEL = process.env.GEMINI_TEXT_MODEL || 'gemini-3.1-flash-lite';
@@ -54,6 +101,9 @@ const GEMINI_IMAGE_MODEL = process.env.GEMINI_IMAGE_MODEL || 'gemini-3.1-flash-i
 const GEMINI_TEXT_TIMEOUT_MS = Number(process.env.GEMINI_TEXT_TIMEOUT_MS || 30000);
 const RAG_SERVICE_URL = process.env.RAG_SERVICE_URL || 'http://rag:3003';
 const QUIZ_SERVICE_URL = process.env.QUIZ_SERVICE_URL || 'http://quiz:3005';
+const PRACTICE_SERVICE_URL = process.env.PRACTICE_SERVICE_URL || 'http://practice:3007';
+const DISCOVER_SERVICE_URL = process.env.DISCOVER_SERVICE_URL || 'http://discover:3008';
+const PSV_SERVICE_URL = process.env.PSV_SERVICE_URL || 'http://psv:3011';
 const ANALYTICS_URL = process.env.ANALYTICS_URL || 'http://analytics:3004';
 const INTERNAL_SERVICE_TOKEN = process.env.INTERNAL_SERVICE_TOKEN || '';
 const OPENROUTER_API_KEY = process.env.OPENROUTER_API_KEY || '';
@@ -62,6 +112,9 @@ const OPENROUTER_QUIZ_MODEL = process.env.OPENROUTER_QUIZ_MODEL || 'openai/gpt-5
 const OPENROUTER_QUIZ_REASONING_EFFORT = process.env.OPENROUTER_QUIZ_REASONING_EFFORT || 'medium';
 const OPENROUTER_QUIZ_TIMEOUT_MS = Number(process.env.OPENROUTER_QUIZ_TIMEOUT_MS || 60000);
 const OPENROUTER_QUIZ_MAX_COMPLETION_TOKENS = Number(process.env.OPENROUTER_QUIZ_MAX_COMPLETION_TOKENS || 4200);
+// Fallback quiz-drafting provider when OPENROUTER_API_KEY isn't funded — Groq is
+// OpenAI-compatible, so it reuses the same chat-completions request shape.
+const GROQ_QUIZ_MODEL = process.env.GROQ_QUIZ_MODEL || GROQ_MODEL;
 const COMFYUI_URL = process.env.COMFYUI_URL || 'http://comfyui:8188';
 const FILE_STORAGE_PATH = process.env.FILE_STORAGE_PATH || path.join(__dirname, 'storage');
 const IMAGE_OUTPUT_DIR = path.join(FILE_STORAGE_PATH, 'images');
@@ -91,43 +144,103 @@ app.get('/health', (_req, res) => {
 
 const studentOnly = [requireAuth, requireAuth.requireRole('student')];
 
+app.get('/api/ai/news/genres', ...studentOnly, asyncHandler(async (req, res) => {
+  const counts = await prisma.studentNewsArticle.groupBy({
+    by: ['category'],
+    where: { safetyStatus: 'approved', expiresAt: { gt: new Date() } },
+    _count: { _all: true },
+  });
+  const available = new Map(counts.map(row => [row.category, row._count._all]));
+  res.status(200).json({
+    genres: [
+      { key: 'for-you', label: 'For You', count: available.size ? 1 : 0 },
+      ...GENRES.map(genre => ({
+        key: genre.key,
+        label: genre.label,
+        count: available.get(genre.key) || 0,
+      })).filter(genre => genre.count > 0),
+    ],
+  });
+}));
+
 app.get('/api/ai/news', ...studentOnly, asyncHandler(async (req, res) => {
   const category = normalizeOptionalText(req.query?.category, 60);
   if (category === false) return res.status(400).json({ error: 'category must be a string up to 60 characters.' });
-  const limit = normalizeOptionalInteger(req.query?.limit, 1, 30);
-  if (limit === false) return res.status(400).json({ error: 'limit must be an integer from 1 to 30.' });
+  const limit = normalizeOptionalInteger(req.query?.limit, 1, 40);
+  if (limit === false) return res.status(400).json({ error: 'limit must be an integer from 1 to 40.' });
+  const offset = normalizeOptionalInteger(req.query?.offset, 0, 400);
+  if (offset === false) return res.status(400).json({ error: 'offset must be an integer from 0 to 400.' });
 
   const now = new Date();
-  const where = {
-    safetyStatus: 'approved',
-    expiresAt: { gt: now },
-  };
-  if (category) where.category = { equals: category, mode: 'insensitive' };
+  const genre = category && category !== 'for-you' ? category.toLowerCase() : null;
+  const where = { safetyStatus: 'approved', expiresAt: { gt: now } };
+  if (genre) where.category = { equals: genre, mode: 'insensitive' };
 
-  let availableArticles = await prisma.studentNewsArticle.findMany({
-    where,
-    orderBy: { publishedAt: 'desc' },
-    take: 100,
+  const fetchPool = async () => prisma.studentNewsArticle.findMany({
+    where, orderBy: { publishedAt: 'desc' }, take: 260,
   });
-  if (!availableArticles.length && NEWS_REFRESH_ENABLED) {
+  let pool = await fetchPool();
+  if (!pool.length && NEWS_REFRESH_ENABLED) {
     await triggerStudentNewsRefresh();
-    availableArticles = await prisma.studentNewsArticle.findMany({
-      where,
-      orderBy: { publishedAt: 'desc' },
-      take: 100,
-    });
+    pool = await fetchPool();
   }
-  const articles = category
-    ? availableArticles.slice(0, limit || 15)
-    : balanceNewsCategories(availableArticles, limit || 15);
 
+  const take = limit || 12;
+  const start = offset || 0;
+  let ordered;
+  let personalised = false;
+
+  if (genre) {
+    ordered = pool;                                   // a genre tab is chronological
+  } else {
+    const nodes = await loadNodes(prisma, req.user.userId, now);
+    const vector = nodesToVector(nodes);
+    personalised = Object.keys(vector).length > 0;
+    ordered = personalised
+      ? rankArticles(pool, vector, { now }).map(row => row.article)
+      : balanceNewsCategories(pool, pool.length);     // cold start: stay balanced
+  }
+
+  const page = ordered.slice(start, start + take);
   res.status(200).json({
-    articles: articles.map(toPublicStudentNewsArticle),
-    refreshedAt: articles.reduce(
+    articles: page.map(toPublicStudentNewsArticle),
+    genre: genre || 'for-you',
+    personalised,
+    offset: start,
+    nextOffset: start + page.length < ordered.length ? start + page.length : null,
+    total: ordered.length,
+    refreshedAt: page.reduce(
       (latest, article) => article.updatedAt > latest ? article.updatedAt : latest,
       new Date(0)
     ),
   });
+}));
+
+app.post('/api/ai/news/signal', ...studentOnly, asyncHandler(async (req, res) => {
+  const articleId = normalizeOptionalText(req.body?.articleId, 60);
+  if (!articleId) return res.status(400).json({ error: 'articleId is required.' });
+  const kind = normalizeOptionalText(req.body?.kind, 20);
+  if (!kind || !NEWS_SIGNAL_KINDS.has(kind)) {
+    return res.status(400).json({ error: `kind must be one of: ${[...NEWS_SIGNAL_KINDS].join(', ')}.` });
+  }
+  const dwellMs = Math.max(0, Math.min(900000, Number(req.body?.dwellMs) || 0));
+
+  const article = await prisma.studentNewsArticle.findUnique({ where: { id: articleId } });
+  if (!article) return res.status(404).json({ error: 'Article not found.' });
+
+  const studentId = req.user.userId;
+  await prisma.studentNewsSignal.create({ data: { studentId, articleId, kind, dwellMs } });
+  await applySignal(prisma, { studentId, article, kind, dwellMs });
+  // Impressions are high-volume and individually meaningless; only rebuild the
+  // derived profile on signals that actually move the graph.
+  const profile = kind === 'impression' ? null : await rebuildProfile(prisma, studentId);
+
+  res.status(202).json({ accepted: true, summary: profile?.summary || null });
+}));
+
+app.get('/api/ai/interest-graph', ...studentOnly, asyncHandler(async (req, res) => {
+  const graph = await loadGraph(prisma, req.user.userId);
+  res.status(200).json(graph);
 }));
 
 app.get('/api/ai/onboarding', ...studentOnly, asyncHandler(async (req, res) => {
@@ -270,6 +383,25 @@ function requireTeacherOrInternal(req, res, next) {
   return requireAuth(req, res, () => requireAuth.requireRole('teacher')(req, res, next));
 }
 
+/**
+ * Service-to-service only. Deliberately NOT `requireTeacherOrInternal`.
+ *
+ * That helper also admits any authenticated teacher, which for a route over a
+ * named student's conversation history would be exactly the teacher view over
+ * learner-derived data that is blocked until `services/privacy` exists. A human
+ * must not be able to reach this by holding a role; only another service can,
+ * by holding the shared token. Routes guarded by this must never be exposed
+ * through Traefik.
+ */
+function requireInternalService(req, res, next) {
+  const internalToken = req.headers['x-internal-service-token'];
+  if (!INTERNAL_SERVICE_TOKEN || internalToken !== INTERNAL_SERVICE_TOKEN) {
+    return res.status(403).json({ error: 'Internal service token required.' });
+  }
+  req.internalCaller = true;
+  return next();
+}
+
 app.post('/api/ai/chat/session', ...studentOnly, asyncHandler(async (req, res) => {
   const profile = await prisma.studentLearningProfile.findUnique({
     where: { studentId: req.user.userId },
@@ -306,6 +438,17 @@ app.post('/api/ai/chat/session', ...studentOnly, asyncHandler(async (req, res) =
     },
   });
 
+  // A chapter-scoped tutor session being created is what "a lesson started"
+  // means in this product. Deterministic, derived from the write above.
+  fireAnalyticsEvent({
+    type: 'lesson_started',
+    studentId: req.user.userId,
+    schoolId: req.user.schoolId,
+    subject: session.subject,
+    sessionId: session.id,
+    metadata: { chapterNumber: session.chapterNumber, chapterName: session.chapterName },
+  });
+
   res.status(201).json({ sessionId: session.id, lessonContext: session });
 }));
 
@@ -329,10 +472,16 @@ app.get('/api/ai/chat/sessions', ...studentOnly, asyncHandler(async (req, res) =
     where.chapterName = { equals: lessonContext.data.chapterName, mode: 'insensitive' };
   }
 
+  // The chapter-scoped panel wants a handful; the all-chats drawer wants the
+  // lot. The DB window is widened past the returned limit because the final
+  // ordering is by latest *message*, not by creation — a long-running older
+  // session would otherwise be invisible however recently it was used.
+  const limit = Math.min(100, Math.max(1, Number(req.query?.limit) || 20));
+
   const sessions = await prisma.chatSession.findMany({
     where,
     orderBy: { createdAt: 'desc' },
-    take: 50,
+    take: Math.max(50, limit * 2),
     select: {
       id: true,
       subject: true,
@@ -377,7 +526,7 @@ app.get('/api/ai/chat/sessions', ...studentOnly, asyncHandler(async (req, res) =
       };
     })
     .sort((a, b) => new Date(b.latestActivityAt) - new Date(a.latestActivityAt))
-    .slice(0, 20);
+    .slice(0, limit);
 
   res.status(200).json({ sessions: ordered });
 }));
@@ -405,9 +554,171 @@ app.get('/api/ai/chat/:sessionId/history', ...studentOnly, asyncHandler(async (r
   })));
 }));
 
+/**
+ * Chat-derived signals for one student, for other services to build on.
+ *
+ * Read-only and deterministic: it mutates no learner state, so it carries no
+ * `event_ids[]`/`gate_version`/`model_version` obligation, and there is no path
+ * from here into a psychometric write. Extraction reuses the interest-graph
+ * matchers; no LLM is involved.
+ *
+ * Internal token only — see `requireInternalService`. Do not route this through
+ * Traefik, and do not relax it to admit teachers before `services/privacy`
+ * exists.
+ */
+/**
+ * One-time export of a student's pre-existing interest graph, for
+ * services/discover's cold-start import.
+ *
+ * This exists instead of a cross-schema data migration: discover pulls a
+ * student's old ai_db nodes the first time they open the feed, stamps
+ * `importedLegacyGraphAt`, and never asks again. When the deprecated
+ * /api/ai/news* shims below are deleted, this route and the interest-graph
+ * tables go with them.
+ *
+ * Internal token only, same reasoning as chat-insights: this is learner-derived
+ * data about a named student, and there is no teacher/parent view over it
+ * before `services/privacy` exists.
+ */
+app.get('/api/ai/internal/interest-graph', requireInternalService, asyncHandler(async (req, res) => {
+  const studentId = normalizeOptionalText(req.query?.studentId, 64);
+  if (!studentId) return res.status(400).json({ error: 'studentId is required.' });
+
+  const nodes = await loadNodes(prisma, studentId);
+  res.json({
+    studentId,
+    nodes: nodes.map(node => ({
+      kind: node.kind,
+      key: node.key,
+      weight: Number(node.weight.toFixed(3)),
+      hits: node.hits,
+    })),
+  });
+}));
+
+/**
+ * Onboarding-declared interests, for the same cold start.
+ *
+ * These were captured at signup and then only ever rendered into the tutor
+ * prompt — they never reached the interest graph, so a brand-new student's
+ * personalised feed had nothing to personalise with on day one even though
+ * they had just answered the question. Only the `interests` array is exported;
+ * the rest of the learning profile is not discover's business.
+ */
+app.get('/api/ai/internal/learning-profile', requireInternalService, asyncHandler(async (req, res) => {
+  const studentId = normalizeOptionalText(req.query?.studentId, 64);
+  if (!studentId) return res.status(400).json({ error: 'studentId is required.' });
+
+  const row = await prisma.studentLearningProfile.findUnique({
+    where: { studentId },
+    select: { profile: true },
+  });
+  const interests = Array.isArray(row?.profile?.interests) ? row.profile.interests : [];
+  res.json({
+    studentId,
+    interests: interests.filter(value => typeof value === 'string').slice(0, 8),
+  });
+}));
+
+app.get('/api/ai/internal/chat-insights', requireInternalService, asyncHandler(async (req, res) => {
+  const studentId = normalizeOptionalText(req.query?.studentId, 64);
+  if (!studentId) {
+    return res.status(400).json({ error: 'studentId is required.' });
+  }
+
+  const where = { studentId };
+
+  const schoolId = normalizeOptionalText(req.query?.schoolId, 64);
+  if (schoolId === false) return res.status(400).json({ error: 'schoolId must be a string.' });
+  if (schoolId) where.schoolId = schoolId;
+
+  if (req.query?.since) {
+    const since = new Date(req.query.since);
+    if (Number.isNaN(since.valueOf())) {
+      return res.status(400).json({ error: 'since must be an ISO-8601 timestamp.' });
+    }
+    where.createdAt = { gte: since };
+  }
+
+  const limit = Math.min(200, Math.max(1, Number(req.query?.limit) || 100));
+
+  const sessions = await prisma.chatSession.findMany({
+    where,
+    orderBy: { createdAt: 'desc' },
+    take: limit,
+    select: {
+      id: true,
+      subject: true,
+      grade: true,
+      board: true,
+      curriculum: true,
+      chapterNumber: true,
+      chapterName: true,
+      createdAt: true,
+      messages: {
+        orderBy: { createdAt: 'asc' },
+        select: { role: true, content: true, createdAt: true },
+      },
+    },
+  });
+
+  const insights = summariseChatHistory(sessions, {
+    since: where.createdAt ? where.createdAt.gte.toISOString() : null,
+  });
+
+  res.status(200).json({ studentId, ...insights });
+}));
+
+/**
+ * Telemetry only for a deterministic client-side rule (turn count on one
+ * chapter) — the decision to show the nudge is made in the browser from data
+ * it already has, never by an LLM. This route exists purely so that decision
+ * is distinguishable in analytics from a student opening the quiz list
+ * unprompted; it makes no learner-state write.
+ */
+app.post('/api/ai/nudges/quiz-shown', ...studentOnly, asyncHandler(async (req, res) => {
+  const subject = normalizeSubject(req.body?.subject);
+  const chapterNumber = Number(req.body?.chapterNumber) || null;
+
+  fireAnalyticsEvent({
+    type: 'quiz_nudge_shown',
+    studentId: req.user.userId,
+    schoolId: req.user.schoolId,
+    subject,
+    metadata: { chapterNumber },
+  });
+
+  res.status(202).json({ recorded: true });
+}));
+
+/*
+ * Client-side telemetry for a student actually opening a recommended video.
+ * Same shape and discipline as the nudge route above: a deterministic record
+ * of something the student did, and no learner-state write.
+ */
+app.post('/api/ai/video/opened', ...studentOnly, asyncHandler(async (req, res) => {
+  const subject = normalizeSubject(req.body?.subject);
+  const topic = normalizeOptionalText(req.body?.topic, 120);
+  if (topic === false) return res.status(400).json({ error: 'topic must be a string up to 120 characters.' });
+
+  fireAnalyticsEvent({
+    type: 'video_opened',
+    studentId: req.user.userId,
+    schoolId: req.user.schoolId,
+    subject,
+    metadata: { topic: topic || null },
+  });
+
+  res.status(202).json({ recorded: true });
+}));
+
 app.post('/api/ai/chat', ...studentOnly, asyncHandler(async (req, res) => {
   const { sessionId } = req.body || {};
   const message = normalizeMessage(req.body?.message);
+  // Explicit opt-in only — rendering/paraphrasing style, not a default the
+  // student didn't choose. Per-message, not persisted: this is a rendering
+  // preference for the next answer, not learner state.
+  const guidedMode = req.body?.mode === 'guided';
 
   if (!sessionId) return res.status(400).json({ error: 'sessionId is required.' });
   if (!message) return res.status(400).json({ error: 'message is required and must be 1-500 characters.' });
@@ -428,6 +739,13 @@ app.post('/api/ai/chat', ...studentOnly, asyncHandler(async (req, res) => {
       reason: inputSafety.reason,
       promptLength: message.length,
     });
+    // Not awaited: the child gets their refusal immediately either way.
+    recordSafetyReviewFlag({
+      req,
+      category: inputSafety.category,
+      surface: 'chat_input',
+      sessionId: session.id,
+    });
     return res.end();
   }
 
@@ -439,6 +757,17 @@ app.post('/api/ai/chat', ...studentOnly, asyncHandler(async (req, res) => {
       content: message,
     },
     select: { id: true },
+  });
+
+  // Student-exclusive preference extraction is deliberately fire-and-forget:
+  // the current tutor response uses the last materialized snapshot and this
+  // observation is available to the next daily preference refresh. Only this
+  // tutor-chat path calls the endpoint, so assessed written answers can never
+  // leak into the preference plane.
+  fireTutorPreferenceObservation({
+    studentId: req.user.userId,
+    messageId: userMessage.id,
+    text: message,
   });
 
   setSseHeaders(res);
@@ -492,7 +821,7 @@ app.post('/api/ai/chat', ...studentOnly, asyncHandler(async (req, res) => {
       return res.end();
     }
 
-    const [chunks, learningProfile, quizLearningContext] = await Promise.all([
+    const [chunks, learningProfile, quizLearningContext, practiceLearningContext, interestContext, knowledgeGapContext] = await Promise.all([
       retrieveRagChunks({
         q: message,
         schoolId: session.schoolId,
@@ -511,6 +840,19 @@ app.post('/api/ai/chat', ...studentOnly, asyncHandler(async (req, res) => {
         grade: session.grade,
         chapterNumber: session.chapterNumber,
       }),
+      loadStudentPracticeLearningContext({
+        studentId: req.user.userId,
+        schoolId: session.schoolId,
+      }),
+      // Swapped, not added: there is one interest graph and services/discover
+      // owns it. Failure here returns '' and the tutor answers unpersonalised.
+      loadStudentInterestContext({ studentId: req.user.userId }),
+      loadStudentKnowledgeGapContext({
+        studentId: req.user.userId,
+        schoolId: session.schoolId,
+        baseUrl: PSV_SERVICE_URL,
+        token: INTERNAL_SERVICE_TOKEN,
+      }),
     ]);
     sendSseEvent(res, 'answer_context', {
       source: chunks.length ? 'rag' : 'general',
@@ -518,6 +860,15 @@ app.post('/api/ai/chat', ...studentOnly, asyncHandler(async (req, res) => {
       subject: session.subject,
       grade: session.grade,
       chapterNumber: session.chapterNumber,
+      chapterName: session.chapterName || null,
+      // The retrieved textbook passages themselves, so the client can show the
+      // academic source beside the generated explanation. Curriculum grounding
+      // is only checkable by the student if they can actually see the source.
+      excerpts: chunks.slice(0, 4).map((chunk, index) => ({
+        index: index + 1,
+        source: chunk.source || 'Lesson',
+        text: String(chunk.text || '').slice(0, 700),
+      })),
     });
 
     const prompt = buildTutorPrompt({
@@ -527,6 +878,10 @@ app.post('/api/ai/chat', ...studentOnly, asyncHandler(async (req, res) => {
       session,
       learningProfile,
       quizLearningContext,
+      practiceLearningContext,
+      interestContext,
+      knowledgeGapContext,
+      guidedMode,
     });
 
     const llmResult = await streamLlmResponse({
@@ -545,6 +900,12 @@ app.post('/api/ai/chat', ...studentOnly, asyncHandler(async (req, res) => {
         category: llmResult.safety?.category,
         reason: llmResult.safety?.reason,
         outputLength: llmResult.originalContentLength,
+      });
+      recordSafetyReviewFlag({
+        req,
+        category: llmResult.safety?.category,
+        surface: 'chat_output',
+        sessionId: session.id,
       });
     }
 
@@ -586,14 +947,46 @@ app.post('/api/ai/chat', ...studentOnly, asyncHandler(async (req, res) => {
 }));
 
 app.get('/api/ai/video/topics', ...studentOnly, (_req, res) => {
+  if (!YOUTUBE_API_KEY) {
+    res.status(200).json(CURATED_VIDEO_TOPICS.map(toPublicCuratedTopicSummary));
+    return;
+  }
   res.status(200).json([]);
 });
 
 app.get('/api/ai/video/:topic', ...studentOnly, (req, res) => {
+  if (!YOUTUBE_API_KEY) {
+    const entry = CURATED_VIDEO_TOPICS.find(item => item.topic === req.params.topic);
+    if (entry) {
+      res.status(200).json(toPublicCuratedTopicDetail(entry));
+      return;
+    }
+  }
   res.status(410).json({
     error: 'Static video topics are disabled. Ask the tutor chat for a real-time video recommendation.',
   });
 });
+
+function toPublicCuratedTopicSummary(entry) {
+  return {
+    topic: entry.topic,
+    label: entry.label,
+    subject: entry.subject,
+    description: `Curated ${entry.subject} videos (real-time search not configured).`,
+  };
+}
+
+function toPublicCuratedTopicDetail(entry) {
+  return {
+    ...toPublicCuratedTopicSummary(entry),
+    videos: entry.videos.map(video => ({
+      title: video.title,
+      source: video.source,
+      url: video.url,
+      durationSeconds: video.durationSeconds || null,
+    })),
+  };
+}
 
 app.post('/api/ai/feedback', ...studentOnly, asyncHandler(async (req, res) => {
   const { messageId, sessionId } = req.body || {};
@@ -675,6 +1068,7 @@ app.post('/api/ai/image', ...studentOnly, asyncHandler(async (req, res) => {
       reason: promptSafety.reason,
       promptLength: prompt.length,
     });
+    recordSafetyReviewFlag({ req, category: promptSafety.category, surface: 'image_prompt' });
     return res.status(400).json({ error: SAFE_REFUSAL_MESSAGE });
   }
 
@@ -761,6 +1155,199 @@ app.get('/api/ai/images/:filename', ...studentOnly, asyncHandler(async (req, res
   }
 }));
 
+/**
+ * Request a generated visual.
+ *
+ * Async for the same reason the image path is: the model call is 10-60s, which
+ * is far too long to hold a request open on a Tier 2/3 connection.
+ */
+app.post('/api/ai/visuals', ...studentOnly, asyncHandler(async (req, res) => {
+  const prompt = normalizeImagePrompt(req.body?.prompt);
+  if (!prompt) {
+    return res.status(400).json({ error: `prompt is required and must be 1-${IMAGE_PROMPT_MAX_LENGTH} characters.` });
+  }
+
+  // validateStudentMessageSafety, NOT validateImagePromptSafety. The image rule
+  // set blocks person/people/child/face/realistic because it exists to stop a
+  // diffusion model rendering a realistic child. A node/edge graph structurally
+  // cannot do that, and those patterns would reject "diagram of blood
+  // circulation in a person" — a legitimate Class-8 request.
+  const promptSafety = validateStudentMessageSafety(prompt);
+  if (!promptSafety.allowed) {
+    fireSafetyAnalyticsEvent('safety_input_blocked', req, {
+      category: promptSafety.category,
+      reason: promptSafety.reason,
+      promptLength: prompt.length,
+    });
+    recordSafetyReviewFlag({ req, category: promptSafety.category, surface: 'visual_prompt' });
+    return res.status(400).json({ error: SAFE_REFUSAL_MESSAGE });
+  }
+
+  const documentId = typeof req.body?.documentId === 'string' ? req.body.documentId.trim() : '';
+  if (!isValidUuid(documentId)) {
+    return res.status(400).json({ error: 'documentId is required so the visual can be grounded in your chapter.' });
+  }
+
+  const intent = routeVisualIntent(prompt, { explicitKind: req.body?.kind });
+  if (!intent.kind) {
+    return res.status(400).json({
+      error: 'Tell me which kind of visual you want, or pick one: concept map or interactive explainer.',
+      kinds: [...INERT_KINDS, ...EXECUTABLE_KINDS],
+    });
+  }
+  // The raster path predates this and stays: diffusion is the right tool for an
+  // illustration and the wrong one for anything carrying labels.
+  if (!isGeneratedHere(intent.kind)) {
+    return res.status(400).json({ error: 'Use /api/ai/image for illustrations.', kind: intent.kind });
+  }
+
+  // Chapter identity is resolved server-side. The client knows a documentId but
+  // holds only 6 of the 9 fields in the identity tuple, so it cannot compute the
+  // cache key and must not try.
+  let context;
+  try {
+    context = await fetchChapterContext({ documentIds: [documentId] });
+  } catch (err) {
+    console.warn('[ai] visual grounding failed:', err.message);
+    return res.status(502).json({ error: 'That chapter is not ready yet. Try again in a moment.' });
+  }
+
+  const chapter = context?.chapter;
+  if (!chapter || String(chapter.schoolId) !== String(req.user.schoolId)) {
+    return res.status(404).json({ error: 'Chapter not found.' });
+  }
+
+  const chunks = selectGroundingChunks(context, { topicText: intent.topicText });
+  if (!chunks.length) {
+    return res.status(422).json({
+      error: 'There is not enough readable text in this chapter yet to build a visual from.',
+    });
+  }
+
+  const chapterKey = chapterKeyFor(chapter);
+  const conceptSlug = conceptSlugFor(intent.topicText, null);
+
+  // Same-student dedupe only. Nothing generated by one student is ever served to
+  // another — with no human reviewing these, the thing that keeps them safe is
+  // that they do not fan out.
+  const cached = await prisma.visualArtifact.findFirst({
+    where: {
+      studentId: req.user.userId,
+      kind: intent.kind,
+      chapterKey,
+      contentFingerprint: chapter.contentFingerprint || '',
+      conceptSlug,
+      status: 'done',
+    },
+    orderBy: { createdAt: 'desc' },
+    select: { id: true, status: true, kind: true },
+  });
+
+  if (cached) {
+    return res.status(200).json({ artifactId: cached.id, status: cached.status, kind: cached.kind });
+  }
+
+  const artifact = await prisma.visualArtifact.create({
+    data: {
+      studentId: req.user.userId,
+      schoolId: req.user.schoolId,
+      kind: intent.kind,
+      status: 'queued',
+      chapterKey,
+      contentFingerprint: chapter.contentFingerprint || '',
+      conceptSlug,
+      prompt,
+    },
+    select: { id: true, status: true, kind: true },
+  });
+
+  runVisualJobInBackground(artifact.id, { chapter, chunks, topicText: intent.topicText });
+
+  res.status(202).json({ artifactId: artifact.id, status: artifact.status, kind: artifact.kind });
+}));
+
+app.get('/api/ai/visuals', ...studentOnly, asyncHandler(async (req, res) => {
+  const requested = Number.parseInt(req.query.limit, 10);
+  const limit = Number.isInteger(requested) ? Math.min(Math.max(requested, 1), 40) : 12;
+
+  const visuals = await prisma.visualArtifact.findMany({
+    where: { studentId: req.user.userId },
+    orderBy: { createdAt: 'desc' },
+    take: limit,
+    select: { id: true, kind: true, prompt: true, status: true, createdAt: true },
+  });
+
+  res.status(200).json({
+    visuals: visuals.map(visual => ({
+      artifactId: visual.id,
+      kind: visual.kind,
+      prompt: visual.prompt,
+      status: visual.status,
+      createdAt: visual.createdAt,
+    })),
+  });
+}));
+
+app.get('/api/ai/visuals/:artifactId', ...studentOnly, asyncHandler(async (req, res) => {
+  if (!isValidUuid(req.params.artifactId)) {
+    return res.status(404).json({ error: 'Visual not found.' });
+  }
+
+  const artifact = await prisma.visualArtifact.findFirst({
+    where: { id: req.params.artifactId, studentId: req.user.userId },
+    select: {
+      id: true, kind: true, status: true, spec: true, provenance: true,
+      failureReason: true, prompt: true, createdAt: true,
+    },
+  });
+
+  if (!artifact) return res.status(404).json({ error: 'Visual not found.' });
+
+  const base = {
+    artifactId: artifact.id,
+    kind: artifact.kind,
+    status: artifact.status,
+    prompt: artifact.prompt,
+    createdAt: artifact.createdAt,
+  };
+
+  if (artifact.status !== 'done' || !artifact.spec) {
+    return res.status(200).json({ ...base, failureReason: artifact.failureReason || null });
+  }
+
+  // Rendered on read, inside a guard: a renderer throw is a logged 500, never a
+  // half-built SVG string reaching the client's innerHTML — and never a
+  // partially-assembled document reaching an iframe. For an executable kind the
+  // static scan runs again inside renderVisual, so this guard is also what makes
+  // the scan fail closed on read: a spec that no longer passes renders nothing.
+  const payloadKey = visualPayloadKey(artifact.kind);
+  let rendered;
+  let altText;
+  try {
+    rendered = renderVisual({
+      id: artifact.id,
+      kind: artifact.kind,
+      spec: artifact.spec,
+      theme: normalizeTheme(req.query.theme),
+    });
+    altText = describeVisual({ kind: artifact.kind, spec: artifact.spec });
+  } catch (err) {
+    console.error(`[ai] visual ${artifact.id} failed to render:`, err);
+    return res.status(500).json({ error: 'This visual could not be displayed.' });
+  }
+
+  res.status(200).json({
+    ...base,
+    [payloadKey]: rendered,
+    // Only an executable kind declares its own height; the SVG tier scales to
+    // the container. Sent as null rather than omitted so the client can branch
+    // on the payload key alone.
+    height: artifact.kind === VISUAL_KINDS.EXPLAINER ? (artifact.spec.height || null) : null,
+    altText,
+    provenance: artifact.provenance || null,
+  });
+}));
+
 app.post('/api/ai/quiz/draft', requireTeacherOrInternal, asyncHandler(async (req, res) => {
   let normalized;
   try {
@@ -777,16 +1364,31 @@ app.post('/api/ai/quiz/draft', requireTeacherOrInternal, asyncHandler(async (req
   }
 
   try {
+    // Only one provider's key/model is ever forwarded — mixing an OpenRouter
+    // model slug into a Groq request (or vice versa) would send an invalid
+    // model name to whichever provider actually gets used.
+    const quizProviderConfig = OPENROUTER_API_KEY
+      ? {
+          openrouterApiKey: OPENROUTER_API_KEY,
+          baseUrl: OPENROUTER_API_BASE_URL,
+          model: OPENROUTER_QUIZ_MODEL,
+          reasoningEffort: OPENROUTER_QUIZ_REASONING_EFFORT,
+          timeoutMs: OPENROUTER_QUIZ_TIMEOUT_MS,
+          maxCompletionTokens: OPENROUTER_QUIZ_MAX_COMPLETION_TOKENS,
+        }
+      : {
+          groqApiKey: GROQ_API_KEY,
+          baseUrl: GROQ_API_BASE_URL,
+          model: GROQ_QUIZ_MODEL,
+          timeoutMs: OPENROUTER_QUIZ_TIMEOUT_MS,
+          // No maxCompletionTokens override here — the Groq provider's own
+          // lower default (quiz-draft.js) keeps a single request comfortably
+          // under Groq's free-tier 12,000 TPM budget.
+        };
+
     const result = await generateQuizDraft({
       payload: normalized,
-      config: {
-        openrouterApiKey: OPENROUTER_API_KEY,
-        baseUrl: OPENROUTER_API_BASE_URL,
-        model: OPENROUTER_QUIZ_MODEL,
-        reasoningEffort: OPENROUTER_QUIZ_REASONING_EFFORT,
-        timeoutMs: OPENROUTER_QUIZ_TIMEOUT_MS,
-        maxCompletionTokens: OPENROUTER_QUIZ_MAX_COMPLETION_TOKENS,
-      },
+      config: quizProviderConfig,
     });
 
     fireAnalyticsEvent({
@@ -876,6 +1478,22 @@ async function shutdown(signal) {
 process.on('SIGINT', () => shutdown('SIGINT'));
 process.on('SIGTERM', () => shutdown('SIGTERM'));
 
+// A stray throw outside the request path (a timer callback, an event
+// listener without its own .catch) would otherwise crash the process
+// silently under Node's default behavior, taking down every concurrently
+// in-flight request with it — worst at peak load, when a latent bug is most
+// likely to fire. Log with full context and exit so the container's
+// `restart: unless-stopped` policy brings it back, rather than limping on in
+// an undefined state.
+process.on('uncaughtException', err => {
+  console.error('[ai] uncaughtException:', err);
+  process.exit(1);
+});
+process.on('unhandledRejection', reason => {
+  console.error('[ai] unhandledRejection:', reason);
+  process.exit(1);
+});
+
 function asyncHandler(handler) {
   return (req, res, next) => Promise.resolve(handler(req, res, next)).catch(next);
 }
@@ -906,6 +1524,12 @@ function toPublicStudentNewsArticle(article) {
     imageUrl: article.imageUrl,
     sourceName: article.sourceName,
     publishedAt: article.publishedAt,
+    // Surfaced so the reader can see what the system understood a story to be
+    // about — the same topics that feed their interest graph. Sent as display
+    // labels because the client only ever renders them.
+    topics: Array.isArray(article.topics)
+      ? article.topics.slice(0, 4).map(key => TOPIC_BY_KEY.get(key)?.label || key)
+      : [],
   };
 }
 
@@ -1010,10 +1634,6 @@ async function findVideoRecommendationForMessage(message, session) {
   return buildUnavailableVideoRecommendation(intent.topicText || intent.query, 'Real-time video search provider is not configured.', subject, grade);
 }
 
-function isVideoRequest(message) {
-  return /\b(video|videos|watch|youtube|playlist|lecture)\b/i.test(message);
-}
-
 const VIDEO_STOP_WORDS = new Set([
   'can',
   'u',
@@ -1048,6 +1668,8 @@ const VIDEO_STOP_WORDS = new Set([
 
 async function searchYoutubeVideoRecommendation(intent, subject, grade) {
   if (!YOUTUBE_API_KEY) {
+    const curated = matchCuratedVideoTopic(intent);
+    if (curated) return buildCuratedVideoRecommendation(curated, intent, subject, grade);
     return buildUnavailableVideoRecommendation(
       intent.topicText || intent.query,
       'YouTube real-time search is not configured yet. Add YOUTUBE_API_KEY to enable live video lookup.',
@@ -1112,6 +1734,11 @@ async function searchYoutubeVideoRecommendation(intent, subject, grade) {
     };
   } catch (err) {
     console.warn('[ai] real-time video search failed:', err.message);
+    // A configured-but-broken key (bad credentials, quota, API not enabled)
+    // fails the same way an absent key does from the student's point of
+    // view — fall back to the curated list rather than a raw failure either way.
+    const curated = matchCuratedVideoTopic(intent);
+    if (curated) return buildCuratedVideoRecommendation(curated, intent, subject, grade);
     return buildUnavailableVideoRecommendation(intent.topicText || intent.query, 'Real-time video search failed. Please try again.', subject, grade);
   }
 }
@@ -1195,6 +1822,35 @@ function scoreRealtimeVideo({ source, viewCount, durationSeconds }) {
   if (viewCount > 100000) score += 8;
   if (durationSeconds && durationSeconds >= 120 && durationSeconds <= 900) score += 7;
   return Math.min(score, 100);
+}
+
+function buildCuratedVideoRecommendation(entry, intent, subject, grade = null) {
+  return {
+    provider: 'curated',
+    query: intent?.query || entry.label,
+    topic: {
+      topic: entry.topic,
+      label: entry.label,
+      subject: subject || entry.subject || 'General',
+      gradeLevel: grade || null,
+      description: 'Curated education video recommendation (real-time video search is not configured).',
+    },
+    videos: entry.videos.map((video, index) => ({
+      id: `curated-${entry.topic}-${index}`,
+      title: video.title,
+      source: video.source,
+      description: '',
+      sourceType: 'curated',
+      url: video.url,
+      thumbnailUrl: null,
+      durationSeconds: video.durationSeconds || null,
+      viewCount: 0,
+      language: 'English',
+      ageBand: 'school',
+      qualityScore: 60,
+      reviewStatus: 'curated_fallback',
+    })),
+  };
 }
 
 function buildUnavailableVideoRecommendation(query, reason, subject, grade = null) {
@@ -1332,6 +1988,140 @@ function runImageJobInBackground(jobId) {
       console.error(`[ai] image job ${jobId} failed unexpectedly:`, err);
     });
   });
+}
+
+function runVisualJobInBackground(artifactId, groundingContext) {
+  setImmediate(() => {
+    processVisualJob(artifactId, groundingContext).catch(err => {
+      console.error(`[ai] visual job ${artifactId} failed unexpectedly:`, err);
+    });
+  });
+}
+
+/**
+ * Generate one visual.
+ *
+ * The grounding context is passed in rather than re-fetched: the route already
+ * paid for the RAG round-trip and re-reading it here would let the chapter shift
+ * between the cache key being computed and the spec being built.
+ */
+async function processVisualJob(artifactId, { chapter, chunks, topicText }) {
+  // Same atomic claim as the image path — two workers must not both spend a
+  // model call on one row.
+  const claimed = await prisma.visualArtifact.updateMany({
+    where: { id: artifactId, status: 'queued' },
+    data: { status: 'processing', failureReason: null },
+  });
+  if (claimed.count !== 1) return;
+
+  const artifact = await prisma.visualArtifact.findUnique({
+    where: { id: artifactId },
+    select: { id: true, kind: true, studentId: true, schoolId: true, prompt: true },
+  });
+  if (!artifact) return;
+
+  try {
+    const { spec, model, provider } = await generateVisualSpec({
+      kind: artifact.kind,
+      chapter,
+      chunks,
+      topicText,
+    });
+
+    // Every human-visible string the model wrote, checked before it can be
+    // stored. A concept-map spec is structurally safe by construction and an
+    // explainer's structure is the scan's job; both of these are about what the
+    // words say. The collector is per-kind because feeding an explainer's
+    // JavaScript through a prose rule set only produces false positives.
+    const visibleText = artifact.kind === VISUAL_KINDS.EXPLAINER
+      ? collectExplainerText(spec)
+      : collectSpecText(spec);
+    const specSafety = validateGeneratedTextSafety(visibleText);
+    if (!specSafety.allowed) {
+      fireSafetyAnalyticsEvent('safety_output_blocked', {
+        user: { userId: artifact.studentId, schoolId: artifact.schoolId },
+      }, {
+        category: specSafety.category,
+        reason: specSafety.reason,
+        outputLength: visibleText.length,
+      });
+      throw new Error('The generated visual did not pass the safety check.');
+    }
+
+    await prisma.visualArtifact.update({
+      where: { id: artifactId },
+      data: {
+        status: 'done',
+        spec,
+        provenance: buildProvenance(chapter, chunks),
+        model: model ? String(model).slice(0, 80) : null,
+        provider: provider ? String(provider).slice(0, 24) : null,
+        failureReason: null,
+      },
+    });
+
+    fireAnalyticsEvent({
+      type: 'visual_generated',
+      studentId: artifact.studentId,
+      schoolId: artifact.schoolId,
+      subject: chapter.subject,
+      metadata: {
+        visualKind: artifact.kind,
+        chapterNumber: chapter.chapterNumber,
+        chapterName: chapter.chapterName,
+        // Structural counts are per-kind. Reading spec.nodes.length
+        // unconditionally throws on an explainer spec — and it would throw
+        // *after* the row was already saved as done, so the artifact would be
+        // marked failed by the catch below despite having generated correctly.
+        ...(artifact.kind === VISUAL_KINDS.EXPLAINER
+          ? { sourceChars: spec.html.length + spec.css.length + spec.js.length, height: spec.height }
+          : { nodeCount: spec.nodes.length, edgeCount: spec.edges.length }),
+        provider: provider || null,
+      },
+    });
+  } catch (err) {
+    console.warn(`[ai] visual ${artifactId} generation failed:`, err.message);
+    await prisma.visualArtifact.update({
+      where: { id: artifactId },
+      data: {
+        status: 'failed',
+        failureReason: buildVisualFailureReason(err),
+      },
+    }).catch(updateErr => {
+      console.error(`[ai] could not mark visual ${artifactId} failed:`, updateErr.message);
+    });
+  }
+}
+
+/**
+ * A failure reason a student can read.
+ *
+ * The raw error can carry a provider name, an HTTP body, or an env var name —
+ * the exact class of leak that once showed a student a missing GEMINI_API_KEY
+ * message. Anything not recognised is replaced rather than truncated.
+ */
+function buildVisualFailureReason(err) {
+  const raw = String(err?.message || '');
+  if (/quota|429|rate limit|too_many_requests/i.test(raw)) {
+    return 'The visual service is busy right now. Please try again in a minute.';
+  }
+  if (/safety check/i.test(raw)) {
+    return 'That request could not be turned into a safe classroom visual.';
+  }
+  // The scan failing on every attempt is the fail-closed path for the
+  // executable tier: nothing is stored as done and nothing renders. The student
+  // is not told which capability was reached for — that names our controls to
+  // whoever was probing them, and is no use to a student either way.
+  if (/which an explainer may not use|refers to an external address/i.test(raw)) {
+    return 'The interactive explainer could not be built safely from this chapter. Try naming a narrower topic.';
+  }
+  if (/failed validation after/i.test(raw)) {
+    return 'The visual could not be built cleanly from this chapter. Try naming a narrower topic.';
+  }
+  if (/not enough|no usable/i.test(raw)) {
+    return 'There is not enough readable text in this chapter yet to build a visual from.';
+  }
+  return 'The visual could not be generated. Please try again later.';
 }
 
 async function processImageJob(jobId) {
@@ -1747,6 +2537,31 @@ async function loadStudentQuizLearningContext(input) {
   }
 }
 
+/**
+ * Same idea as loadStudentQuizLearningContext, second source. services/practice
+ * is ungated by design (see CLAUDE.md), so this signal reaches the tutor
+ * prompt without any approval step — the only automation effect is the same
+ * soft phrasing nudge the quiz-derived context already has, never a change to
+ * difficulty, item selection or routing.
+ */
+async function loadStudentPracticeLearningContext(input) {
+  if (!PRACTICE_SERVICE_URL || !INTERNAL_SERVICE_TOKEN) return null;
+  try {
+    const payload = await fetchJsonWithTimeout(
+      buildPracticeLearningContextUrl(PRACTICE_SERVICE_URL, input),
+      {
+        method: 'GET',
+        headers: { 'X-Internal-Service-Token': INTERNAL_SERVICE_TOKEN },
+      },
+      3000
+    );
+    return normalizePracticeLearningContext(payload);
+  } catch (error) {
+    console.warn('[ai] Practice learning context unavailable, continuing without it:', error.message);
+    return null;
+  }
+}
+
 async function generateOnboardingQuestions() {
   if (!GEMINI_API_KEY) {
     return { questions: sanitizeQuestions(null), source: 'fallback_no_key' };
@@ -1833,8 +2648,8 @@ async function retrieveRagChunks({ q, schoolId, subject, board, curriculum, grad
 
   try {
     const response = await fetchJsonWithTimeout(
-      `${RAG_SERVICE_URL}/api/rag/retrieve?${params.toString()}`,
-      { method: 'GET' },
+      `${RAG_SERVICE_URL}/api/rag/internal/retrieve?${params.toString()}`,
+      { method: 'GET', headers: { 'X-Internal-Service-Token': INTERNAL_SERVICE_TOKEN } },
       5000
     );
     const chunks = Array.isArray(response) ? response : response?.chunks;
@@ -1854,7 +2669,7 @@ async function retrieveRagChunks({ q, schoolId, subject, board, curriculum, grad
   }
 }
 
-function buildTutorPrompt({ chunks, history, question, session, learningProfile, quizLearningContext }) {
+function buildTutorPrompt({ chunks, history, question, session, learningProfile, quizLearningContext, practiceLearningContext, interestContext, knowledgeGapContext, guidedMode }) {
   const hasChunks = chunks.length > 0;
   const ragContext = hasChunks
     ? chunks.map((chunk, index) => `[${index + 1}] ${chunk.text} (source: ${chunk.source})`).join('\n\n')
@@ -1866,7 +2681,13 @@ function buildTutorPrompt({ chunks, history, question, session, learningProfile,
   const lessonContext = formatLessonContextForPrompt(session);
   const personalizationContext = learningProfile?.promptContext
     || formatProfileForPrompt(learningProfile?.profile);
-  const academicPersonalizationContext = formatQuizLearningContextForPrompt(quizLearningContext);
+  // Two sources, concatenated rather than one replacing the other: the gated
+  // quiz pipeline and the ungated instant-practice pipeline are separate
+  // signals, and neither should silently crowd the other out of the prompt.
+  const academicPersonalizationContext = [
+    formatQuizLearningContextForPrompt(quizLearningContext),
+    formatPracticeLearningContextForPrompt(practiceLearningContext),
+  ].join('\n\n');
 
   const noContextRule = hasChunks
     ? [
@@ -1880,6 +2701,23 @@ function buildTutorPrompt({ chunks, history, question, session, learningProfile,
         '- If the question is not a school-learning question or you are unsure, say: "I do not have information on that yet."',
       ].join('\n');
 
+  const answerFlowRule = guidedMode
+    ? [
+        '- SOCRATIC MODE is on for this reply — the student chose "Guide me" instead of "Tell me directly". Do not lead with the answer.',
+        '  1. Ask one focused guiding question that nudges the student toward the idea themselves, building on what they already said in the conversation so far.',
+        '  2. Offer a small hint if it helps, but not the answer itself.',
+        '  3. If the student has already made a genuine attempt earlier in this conversation, or directly asks for the answer, give the direct answer and a short explanation as normal instead of another question.',
+        '  4. Keep the tone encouraging and concise — never quiz-like or repetitive.',
+      ].join('\n')
+    : [
+        '- For concept questions, use this flow:',
+        '  1. Start with a direct answer in 1 to 2 sentences.',
+        '  2. Explain the important idea or formula, including what each term means.',
+        '  3. Give a concrete example or worked example.',
+        '  4. Add a common mistake or exam tip when it helps.',
+        '  5. End with one short practice question only when it is useful.',
+      ].join('\n');
+
   return `You are Roognis, an AI tutor for school students.
 Rules:
 ${noContextRule}
@@ -1890,12 +2728,7 @@ ${noContextRule}
 - Use short paragraphs, numbered steps, and bullet lists when useful.
 - Do not show raw Markdown symbols such as **bold**, leading asterisks, or LaTeX dollar signs.
 - Teach like a strong school tutor: practical, accurate, and easy to revise from.
-- For concept questions, use this flow:
-  1. Start with a direct answer in 1 to 2 sentences.
-  2. Explain the important idea or formula, including what each term means.
-  3. Give a concrete example or worked example.
-  4. Add a common mistake or exam tip when it helps.
-  5. End with one short practice question only when it is useful.
+${answerFlowRule}
 - Keep the answer easy to scan. Avoid long paragraphs.
 - For one-word or unclear questions, ask one focused follow-up instead of giving a childish generic answer.
 
@@ -1907,6 +2740,12 @@ ${personalizationContext}
 
 Recent quiz-informed academic personalization:
 ${academicPersonalizationContext}
+
+Canonical daily academic state and decisions:
+${formatKnowledgeGapContextForPrompt({ knowledgeGaps: knowledgeGapContext || [] })}
+
+Real-world interests, for choosing examples only:
+${interestContext || 'Not enough reading history yet — use neutral examples.'}
 
 Context:
 ${ragContext}
@@ -1946,6 +2785,10 @@ function sendSseEvent(res, event, data) {
 async function streamLlmResponse({ prompt, res, signal, isClientClosed }) {
   if (LLM_PROVIDER === 'gemini') {
     return streamGeminiResponse({ prompt, res, signal, isClientClosed });
+  }
+
+  if (LLM_PROVIDER === 'groq') {
+    return streamGroqResponse({ prompt, res, signal, isClientClosed });
   }
 
   return streamOllamaResponse({ prompt, res, signal, isClientClosed });
@@ -2176,6 +3019,73 @@ async function streamOllamaResponse({ prompt, res, signal, isClientClosed }) {
   };
 }
 
+function ensureGroqApiKey(action) {
+  if (!GROQ_API_KEY) {
+    throw new Error(`GROQ_API_KEY is required for Groq ${action}.`);
+  }
+}
+
+async function streamGroqResponse({ prompt, res, signal, isClientClosed }) {
+  const content = await generateGroqTextResponse({ prompt, signal });
+
+  const outputSafety = validateGeneratedTextSafety(content);
+  if (!outputSafety.allowed) {
+    const safeContent = await streamTextAsSse(SAFE_REFUSAL_MESSAGE, res, isClientClosed);
+    return {
+      content: safeContent,
+      safetyBlocked: true,
+      safety: outputSafety,
+      originalContentLength: content.length,
+    };
+  }
+
+  const safeContent = await streamTextAsSse(content, res, isClientClosed);
+  return {
+    content: safeContent,
+    safetyBlocked: false,
+  };
+}
+
+async function generateGroqTextResponse({ prompt, signal }) {
+  ensureGroqApiKey('chat completion');
+
+  const requestAbort = new AbortController();
+  const timeout = setTimeout(() => requestAbort.abort(new Error('Groq request timed out.')), GROQ_TEXT_TIMEOUT_MS);
+  const abortFromClient = () => requestAbort.abort(signal?.reason);
+  if (signal?.aborted) {
+    abortFromClient();
+  } else {
+    signal?.addEventListener('abort', abortFromClient, { once: true });
+  }
+
+  try {
+    const response = await fetch(`${GROQ_API_BASE_URL.replace(/\/+$/, '')}/chat/completions`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${GROQ_API_KEY}`,
+      },
+      body: JSON.stringify({
+        model: GROQ_MODEL,
+        messages: [{ role: 'user', content: prompt }],
+        stream: false,
+      }),
+      signal: requestAbort.signal,
+    });
+
+    if (!response.ok) {
+      const errorBody = await response.text().catch(() => '');
+      throw new Error(`Groq request failed with ${response.status}: ${errorBody}`);
+    }
+
+    const parsed = await response.json();
+    return parsed?.choices?.[0]?.message?.content || '';
+  } finally {
+    clearTimeout(timeout);
+    signal?.removeEventListener?.('abort', abortFromClient);
+  }
+}
+
 async function fetchJsonWithTimeout(url, options, timeoutMs) {
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), timeoutMs);
@@ -2233,6 +3143,52 @@ function fireAnalyticsEvent(event) {
   ).catch(err => {
     console.warn('[ai] analytics event failed:', err.message);
   });
+}
+
+function fireTutorPreferenceObservation({ studentId, messageId, text }) {
+  if (!DISCOVER_SERVICE_URL || !INTERNAL_SERVICE_TOKEN) return;
+  fetchJsonWithTimeout(
+    `${DISCOVER_SERVICE_URL.replace(/\/+$/, '')}/api/discover/internal/preference-observations`,
+    {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-Internal-Service-Token': INTERNAL_SERVICE_TOKEN,
+      },
+      body: JSON.stringify({ studentId, messageId, text }),
+    },
+    2500
+  ).catch(err => {
+    console.warn('[ai] tutor preference observation failed:', err.message);
+  });
+}
+
+/**
+ * Record a possible well-being concern for a human to look at.
+ *
+ * Separate from the analytics event on purpose. The analytics event is an
+ * anonymous count for dashboards; this is a durable, attributable row with an
+ * acknowledgement state, because MASTERCONTEXT §12 requires that a welfare
+ * concern reaches a person rather than a statistic.
+ *
+ * Best-effort by design: a failure here must never stop the student receiving
+ * their refusal, and must never surface a stack trace to a child. It is logged
+ * loudly rather than swallowed, since a silently failing safety queue is worse
+ * than none.
+ */
+async function recordSafetyReviewFlag({ req, category, surface, sessionId }) {
+  if (!isWelfareConcern(category)) return;
+  const studentId = req.user?.userId;
+  const schoolId = req.user?.schoolId;
+  if (!studentId || !schoolId) return;
+
+  try {
+    await prisma.safetyReviewFlag.create({
+      data: { studentId, schoolId, category, surface, sessionId: sessionId || null },
+    });
+  } catch (err) {
+    console.error('[ai] SAFETY REVIEW FLAG NOT RECORDED — a welfare concern may go unseen:', err.message);
+  }
 }
 
 function fireSafetyAnalyticsEvent(type, req, metadata = {}) {

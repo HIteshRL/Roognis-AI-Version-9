@@ -46,6 +46,18 @@ class Settings(BaseSettings):
         False,
         description="Enables lightweight test defaults for pytest/TestClient runs.",
     )
+    db_pool_size: int = Field(
+        5,
+        ge=1,
+        description="SQLAlchemy connection pool size. Explicit rather than the "
+        "library default, since 8 services already share one Postgres instance "
+        "with a stock max_connections=100 and no PgBouncer in front of it.",
+    )
+    db_max_overflow: int = Field(
+        5,
+        ge=0,
+        description="Extra connections allowed beyond db_pool_size under burst load.",
+    )
     quiz_service_url: str = Field(
         "",
         description="Quiz Service base URL used for chapter-ready notifications.",
